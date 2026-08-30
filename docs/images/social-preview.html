@@ -1,0 +1,127 @@
+<!doctype html>
+<!--
+  Source for docs/images/social-preview.png — the repo's GitHub social preview card
+  (Settings → Social preview). 1280×640, GitHub's recommended size.
+
+  Self-contained: no images, only webfonts. The six counts are the ones the README's
+  "six layers" table states, so if those change, change them here too.
+
+  Regenerate (needs playwright installed somewhere; run from a dir that resolves it):
+
+    node -e "
+    const { chromium } = require('playwright');
+    (async () => {
+      const b = await chromium.launch();
+      const p = await b.newPage({ viewport: { width: 1280, height: 640 }, deviceScaleFactor: 2 });
+      await p.goto('file:///ABSOLUTE/PATH/TO/docs/images/social-preview.html');
+      await p.waitForLoadState('networkidle');
+      await p.evaluate(() => document.fonts.ready);
+      await p.waitForTimeout(1200);
+      await p.screenshot({ path: 'social-preview.png' });
+      await b.close();
+    })();"
+
+    # then downscale the 2x shot to exactly 1280x640:
+    python3 -c "from PIL import Image; p='docs/images/social-preview.png'; \
+      Image.open(p).resize((1280,640), Image.LANCZOS).save(p, optimize=True)"
+-->
+<html><head><meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1280px;height:640px;overflow:hidden}
+  body{
+    background:#0d1117;
+    font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    color:#e6edf3;
+    display:flex;flex-direction:column;
+    padding:58px 64px 52px;
+    position:relative;
+  }
+  /* subtle warm glow, top-left */
+  body::before{
+    content:"";position:absolute;top:-260px;left:-180px;width:820px;height:620px;
+    background:radial-gradient(closest-side, rgba(210,153,34,.16), transparent 70%);
+    pointer-events:none;
+  }
+  .top{display:flex;align-items:center;gap:16px;margin-bottom:26px}
+  .mark{
+    width:46px;height:46px;border-radius:11px;flex:none;
+    background:linear-gradient(145deg,#d29922,#c2701c);
+    display:flex;align-items:center;justify-content:center;
+    font-family:"JetBrains Mono",monospace;font-weight:700;font-size:25px;color:#0d1117;
+  }
+  h1{
+    font-family:"JetBrains Mono",monospace;font-size:47px;font-weight:700;
+    letter-spacing:-1.6px;line-height:1;
+  }
+  .lede{
+    font-size:26px;line-height:1.42;color:#c9d1d9;font-weight:400;
+    max-width:1080px;margin-bottom:36px;
+  }
+  .lede b{color:#f0f6fc;font-weight:600}
+  .mid{flex:1;display:flex;flex-direction:column;justify-content:center;padding-bottom:8px}
+  .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
+  .scale{
+    margin:32px 0 0;display:flex;align-items:center;gap:22px;
+    font-family:"JetBrains Mono",monospace;font-size:22px;color:#8b949e;font-weight:400;
+  }
+  .scale b{color:#c9d1d9;font-weight:500}
+  .dot{width:5px;height:5px;border-radius:50%;background:#484f58;flex:none}
+  .cell{
+    background:#161b22;border:1px solid #30363d;border-radius:12px;
+    padding:20px 16px 17px;
+  }
+  .num{
+    font-family:"JetBrains Mono",monospace;font-size:41px;font-weight:700;
+    color:#e3b341;line-height:1;letter-spacing:-1.5px;
+  }
+  .lbl{
+    font-size:16px;color:#8b949e;margin-top:9px;font-weight:500;
+    letter-spacing:.1px;
+  }
+  .foot{
+    display:flex;align-items:center;justify-content:space-between;
+    border-top:1px solid #21262d;padding-top:22px;margin-top:34px;
+  }
+  .tag{
+    font-family:"JetBrains Mono",monospace;font-size:21px;color:#a4b1bd;font-weight:500;
+  }
+  .tag span{color:#e3b341}
+  .who{font-size:19px;color:#7d8590;font-weight:500}
+  .who b{color:#c9d1d9;font-weight:600}
+</style></head>
+<body>
+  <div class="top">
+    <div class="mark">&gt;_</div>
+    <h1>claude-code-monorepo</h1>
+  </div>
+
+  <div class="mid">
+  <p class="lede">
+    The <b>real</b> Claude Code configuration behind a 13-service TypeScript platform —
+    skills, hooks, subagents, memory and one full epic walkthrough. Sanitized, not simplified.
+  </p>
+
+  <div class="grid">
+    <div class="cell"><div class="num">71</div><div class="lbl">skills</div></div>
+    <div class="cell"><div class="num">34</div><div class="lbl">hooks</div></div>
+    <div class="cell"><div class="num">31</div><div class="lbl">agents</div></div>
+    <div class="cell"><div class="num">172</div><div class="lbl">memories</div></div>
+    <div class="cell"><div class="num">19</div><div class="lbl">CLAUDE.md</div></div>
+    <div class="cell"><div class="num">53</div><div class="lbl">commands</div></div>
+  </div>
+
+  <div class="scale">
+    <span>Used to ship <b>~250k lines</b></span><i class="dot"></i>
+    <span><b>~780 merged PRs</b></span><i class="dot"></i>
+    <span><b>7 months</b></span><i class="dot"></i>
+    <span>largely <b>one engineer</b></span>
+  </div>
+  </div>
+
+  <div class="foot">
+    <div class="tag">maker <span>&ne;</span> checker &nbsp;·&nbsp; verifiable stop conditions</div>
+    <div class="who">github.com/<b>milosCvetkovicDev</b></div>
+  </div>
+</body></html>
