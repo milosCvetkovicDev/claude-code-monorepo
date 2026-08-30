@@ -1,5 +1,7 @@
 # Worktree workspace allocation
 
+> Deep-dive · narrated by [chapter 12 — Running many at once](../12-running-many-at-once.md) · [Contents](../README.md)
+
 You have one monorepo and several things in flight at once: a feature branch, a hotfix, a
 pull request you are reviewing, and an agent that wants somewhere to try something
 destructive. `git worktree` gives you four checkouts cheaply. It does not give you four
@@ -769,15 +771,15 @@ most tired.
 
 ## Where this connects
 
-- [`project/scripts/local-multi-instance/acme-worktree`](../project/scripts/local-multi-instance/acme-worktree)
+- [`project/scripts/local-multi-instance/acme-worktree`](../../project/scripts/local-multi-instance/acme-worktree)
   — the implementation, with its
-  [config schema](../project/scripts/local-multi-instance/multi-instance.schema.json) and
-  [example config](../project/scripts/local-multi-instance/multi-instance.config.example.json).
-- [`project/scripts/local-multi-instance/CLAUDE.md`](../project/scripts/local-multi-instance/CLAUDE.md)
+  [config schema](../../project/scripts/local-multi-instance/multi-instance.schema.json) and
+  [example config](../../project/scripts/local-multi-instance/multi-instance.config.example.json).
+- [`project/scripts/local-multi-instance/CLAUDE.md`](../../project/scripts/local-multi-instance/CLAUDE.md)
   — the operational reference: every subcommand, every config key, and the troubleshooting table.
-- [`global/references/git/worktree-operations.md`](../global/references/git/worktree-operations.md)
+- [`global/references/git/worktree-operations.md`](../../global/references/git/worktree-operations.md)
   — the raw-git layer underneath, including why parallel agents need separate worktrees rather
   than merely separate file scopes.
-- [`project/.claude/hooks/worktree-doctor.sh`](../project/.claude/hooks/worktree-doctor.sh)
+- [`project/.claude/hooks/worktree-doctor.sh`](../../project/.claude/hooks/worktree-doctor.sh)
   — principle 3 wired to session start.
-- [`install.md`](../install.md) — installing the CLI, and why by symlink rather than copy.
+- [Appendix A — Installing this setup](../appendix-a-install.md) — installing the CLI, and why by symlink rather than copy.

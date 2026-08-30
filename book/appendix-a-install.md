@@ -1,4 +1,8 @@
-# Installing this setup
+# Appendix A · Installing this setup
+
+> Appendices · [← The system it built](13-the-system-it-built.md) · [Contents](README.md) · [Next: Attribution and lineage →](appendix-b-attribution-and-lineage.md)
+
+---
 
 Nothing here installs itself. Read before you copy — a hook that runs your test suite on
 every `Stop` is excellent on a repo with fast tests and miserable on one without.
@@ -63,7 +67,7 @@ added.
 database name and Docker project name all derived from one integer — so several checkouts of the
 same monorepo run at once without colliding. It is optional and independent of everything else
 here. The design, and the reasons behind each rule, are in
-[`docs/worktree-workspace-allocation.md`](docs/worktree-workspace-allocation.md).
+[`deep-dives/worktree-workspace-allocation.md`](deep-dives/worktree-workspace-allocation.md).
 
 Needs `jq`, `git` and `tmux`. Install it by **symlink, not copy**:
 

@@ -6,7 +6,7 @@ worktrees, or several agents, are live at once.
 
 For the tooling that automates the whole lifecycle (port allocation, generated env files,
 shared agent config, reconciliation), see
-[`worktree-workspace-allocation.md`](../../../docs/worktree-workspace-allocation.md) and the
+[`worktree-workspace-allocation.md`](../../../book/deep-dives/worktree-workspace-allocation.md) and the
 `acme-worktree` CLI. This file is the raw-git reference underneath it.
 
 ---

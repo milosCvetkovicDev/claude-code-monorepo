@@ -1,6 +1,8 @@
 # Ultracode workflows — execution plan
 
-> Companion to [`loop-engineering.md`](./loop-engineering.md). Loop engineering replaces **you as
+> Deep-dive · narrated by [chapter 12 — Running many at once](../12-running-many-at-once.md) · [Contents](../README.md)
+
+> Companion to [chapter 2 — Loops, not prompts](../02-loops-not-prompts.md). Loop engineering replaces **you as
 > the prompter**. Ultracode workflows replace the **sequential maker**: instead of one agent doing
 > task after task in one context, you author a deterministic script that fans the work out across
 > many agents — to be _comprehensive_ (decompose and cover in parallel), _confident_ (independent
@@ -55,7 +57,7 @@ is **not** a barrier — do it inside a pipeline stage.
 
 ## 2. Mapping the implementation lifecycle to workflows
 
-The PM ceremony (see [`loop-engineering.md`](./loop-engineering.md)) stays the backbone; ultracode
+The PM ceremony (see [chapter 10 — The ceremony](../10-the-ceremony.md)) stays the backbone; ultracode
 accelerates the **parallelizable** steps. Run one workflow **per phase** and read each result before
 deciding the next — you stay in the loop between phases.
 
@@ -302,7 +304,7 @@ return bugs;
 - **No write races.** Shared config + barrels (`src/index.ts`, `tsconfig.base.json`, `theme.css`) are edited
   in the **main session**; fan-out agents create only their own files. Use `isolation: 'worktree'` on a
   fan-out stage only when its agents mutate the same files in parallel (it adds worktree setup + disk per
-  agent). _Distinct_ from `loop-engineering.md`'s per-issue worktree — that isolates whole issues at
+  agent). _Distinct_ from the ceremony's per-issue worktree — that isolates whole issues at
   `issue-start`, not stages within one workflow.
 - **The loop opens PRs but never merges.** No `--admin` / `--no-verify` / auto-merge from a workflow. The
   human gate is branch protection + the required checks (`Validate Terraform`, `ci-gate`, `platform-ci-gate` —
