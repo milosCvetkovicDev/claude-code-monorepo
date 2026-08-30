@@ -4,7 +4,13 @@
   (Settings → Social preview). 1280×640, GitHub's recommended size.
 
   Self-contained: no images, only webfonts. The six counts are the ones the README's
-  "six layers" table states, so if those change, change them here too.
+  "six layers" table states — and scripts/check-counts.py asserts the "13-chapter book"
+  claim in this file against the tree, so a chapter added without touching the card
+  fails CI rather than shipping a stale number.
+
+  The footer's right side is the site URL doing two jobs at once: where to read it, and
+  who wrote it (the handle is the host). An earlier draft stacked the URL above a
+  separate github.com/<handle> line, and at these font sizes BOTH wrapped to two lines.
 
   Regenerate (needs playwright installed somewhere; run from a dir that resolves it):
 
@@ -88,8 +94,14 @@
     font-family:"JetBrains Mono",monospace;font-size:21px;color:#a4b1bd;font-weight:500;
   }
   .tag span{color:#e3b341}
-  .who{font-size:19px;color:#7d8590;font-weight:500}
-  .who b{color:#c9d1d9;font-weight:600}
+  /* Right of the footer rule: the site URL, which doubles as the attribution — the
+     handle is in the host, so one line carries both "where to read it" and "who wrote
+     it". Stacking them as two lines made both wrap; this fits on one with room to spare. */
+  .site{
+    font-family:"JetBrains Mono",monospace;font-size:19px;font-weight:400;
+    color:#7d8590;letter-spacing:-.2px;white-space:nowrap;
+  }
+  .site b{color:#e3b341;font-weight:600}
 </style></head>
 <body>
   <div class="top">
@@ -123,6 +135,6 @@
 
   <div class="foot">
     <div class="tag">maker <span>&ne;</span> checker &nbsp;·&nbsp; verifiable stop conditions</div>
-    <div class="who">github.com/<b>milosCvetkovicDev</b></div>
+    <div class="site"><b>miloscvetkovicdev.github.io</b>/claude-code-monorepo</div>
   </div>
 </body></html>
