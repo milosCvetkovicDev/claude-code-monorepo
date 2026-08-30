@@ -4,6 +4,7 @@
 sanitized configuration from seven months of shipping a production TypeScript monorepo.
 Organized as a book: read it high-level to low-level, cover to cover.**
 
+[![Read online](https://img.shields.io/badge/read-online-3fb950.svg)](https://miloscvetkovicdev.github.io/claude-code-monorepo/)
 [![book-guard](https://github.com/milosCvetkovicDev/claude-code-monorepo/actions/workflows/book-guard.yml/badge.svg)](https://github.com/milosCvetkovicDev/claude-code-monorepo/actions/workflows/book-guard.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-configuration-d29922.svg)](https://docs.anthropic.com/en/docs/claude-code)
@@ -30,6 +31,9 @@ Two disciplines run through everything here:
 The guided reading of this repository lives in [**`book/`**](book/README.md) — thirteen
 chapters, high level to low level, each descending from concept into the real files.
 ~1–2 hours cover to cover; every chapter stands alone.
+
+**Prefer a website?** The same two volumes, with search and navigation, are at
+**[miloscvetkovicdev.github.io/claude-code-monorepo](https://miloscvetkovicdev.github.io/claude-code-monorepo/)**.
 
 |          | Chapters                                                                                                                                                                                                                                                          |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
