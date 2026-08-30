@@ -78,6 +78,24 @@ and adapted to this codebase.
 [skill-precedence rule](../project/CLAUDE.md) exists precisely to keep these three
 sources composed rather than colliding.
 
+## The same setup, on a public project
+
+Almost everything in this export was used on a private employer codebase you cannot
+read — which makes the configuration hard to check against real output. One public
+project closes that gap:
+[**football-trackers**](https://github.com/milosCvetkovicDev/football-trackers) is a
+real-time GPS tracking system (ESP32 firmware → MQTT → Bun/Elysia ingest → a live
+React coach view), built with the *machine-scoped* half of this setup — the same
+`global/CLAUDE.md`, the same eight rules, the same PM ceremony and the same
+maker ≠ checker discipline.
+
+It is a smaller system than the platform of [chapter 13](13-the-system-it-built.md),
+but it is *readable end to end*: 25 ADRs, a hardware-free e2e suite, CI-enforced
+static guards, and a documented privacy posture. If you want to see what this
+configuration's habits look like in code someone can actually open — the ADR trail,
+the guard-per-failure-mode reflex, the "verify by execution" commit messages — read
+that repository alongside this one.
+
 ## License
 
 Configuration and prose are MIT (see [`LICENSE`](../LICENSE); third-party

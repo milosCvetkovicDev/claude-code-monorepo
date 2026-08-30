@@ -1,0 +1,7 @@
+Addresses that must NEVER fire.
+
+RFC 5737 documentation ranges: 203.0.113.10, 198.51.100.4, 192.0.2.7
+Loopback and private: 127.0.0.1, 10.0.0.1, 192.168.1.1, 172.16.4.2, 0.0.0.0
+Link-local: 169.254.169.254
+Multicast: 239.255.0.1
+Version strings that look like IPs: 1.2.3.4000, 10.20.30.400

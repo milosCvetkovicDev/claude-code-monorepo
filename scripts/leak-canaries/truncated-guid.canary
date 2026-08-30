@@ -1,0 +1,4 @@
+tenantId = "9a4e7c11"
+client_id: 3fb2d8a0
+
+The sanitized prefix (must NOT fire): tenantId = "00000000"

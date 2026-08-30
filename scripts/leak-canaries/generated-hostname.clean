@@ -1,0 +1,8 @@
+Hostnames that must NEVER fire — the fictional estate and generic service domains.
+
+prod-acme-legacy-api-web-app.azurewebsites.net
+dev-2-acme-legacy-api-web-app.azurewebsites.net
+legacy-api-development.azurewebsites.net
+development-acme-bun-nx-cache.azurecontainerapps.io
+uksouth.azurecontainerapps.io
+prod-acme-postgres.postgres.database.azure.com

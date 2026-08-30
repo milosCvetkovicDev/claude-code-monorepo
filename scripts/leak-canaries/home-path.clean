@@ -1,0 +1,5 @@
+Legitimate path shapes — none of these may fire.
+
+Sanitized placeholders: ~/work/repo, $PROJECT_ROOT/file.ts, /Users/<me>/x, /home/<user>/y
+Service accounts in containers: /home/argocd/, /home/runner/work/, /home/node/app/, /home/postgres/data/
+The home shorthand: ~/.claude/rules/datetime.md

@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "Reviewed exceptions for scripts/check-leaks.py.",
+    "",
+    "Every entry is content that deliberately CONTAINS a bad shape in order to teach it:",
+    "a checklist showing what a hardcoded key looks like, a rule showing the path form it",
+    "forbids, a testcontainer's throwaway password. Suppressing the rule globally would",
+    "create exactly the false negatives SANITIZATION.md stage 5 was written about, so the",
+    "exceptions are enumerated here instead, each with a reason a reader can check.",
+    "",
+    "Entries are matched on (path, rule). A stale entry — one that no longer matches",
+    "anything — FAILS the sweep: an allowlist is a debt register, and it must shrink when",
+    "the content it excuses is gone, or it silently starts excusing something else.",
+    "",
+    "Adding one? It must be a teaching example or a documented anti-pattern. If it is a",
+    "real value, rotate it at the source and remove it from the tree — see SANITIZATION.md,",
+    "'Credentials: the originals, not the copy'."
+  ],
+  "allow": [
+    {
+      "path": "project/.claude/skills/code-review/references/review-checklists.md",
+      "rule": "secret-literal",
+      "reason": "Anti-example: the review checklist shows a hardcoded API key so a reviewer learns to flag it. The value is a visibly fake 'sk-1234567890'."
+    },
+    {
+      "path": "project/.claude/skills/implement-integration-tests/references/test-templates.md",
+      "rule": "secret-literal",
+      "reason": "Local testcontainer credential ('postgres'), the conventional throwaway for an ephemeral test database. Never reaches an environment."
+    },
+    {
+      "path": "global/rules/path-standards.md",
+      "rule": "home-path",
+      "reason": "The rule that FORBIDS absolute home paths, quoting the form it forbids as its own bad example. Placeholder username, not a real one."
+    },
+    {
+      "path": "global/skills/kubernetes-skill/references/examples-bad.md",
+      "rule": "secret-literal",
+      "reason": "Vendored third-party skill; the file's entire purpose is bad examples ('examples-bad.md'). Fake 'sk-live-abc123def456'."
+    }
+  ]
+}

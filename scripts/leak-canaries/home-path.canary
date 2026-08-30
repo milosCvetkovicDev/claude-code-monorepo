@@ -1,0 +1,6 @@
+Absolute path: /Users/jdoe/work/repo/file.ts
+Linux: /home/jdoe/src/thing
+Windows: C:\\Users\\Jdoe\\repo
+Claude project slug: ~/.claude/projects/-Users-jdoe-work-repo/memory/
+
+Sanitized (must NOT fire): ~/work/repo, $PROJECT_ROOT/file.ts, /Users/<me>/x

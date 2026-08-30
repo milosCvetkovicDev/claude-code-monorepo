@@ -1,0 +1,7 @@
+Sanitized GUID forms used throughout the export — none of these may fire.
+
+Plain counter form:      00000000-0000-0000-0000-000000000042
+All zeros:               00000000-0000-0000-0000-000000000000
+UUIDv4-shaped variant:   00000000-0000-4000-8000-000000000001
+Another v4 variant:      00000000-0000-4000-a000-000000000001
+Higher counter:          00000000-0000-0000-0000-000000000010

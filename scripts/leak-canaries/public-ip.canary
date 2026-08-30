@@ -1,0 +1,6 @@
+Load balancer public IP: 51.142.87.203
+Another: 20.108.44.9
+
+Documentation range (must NOT fire): 203.0.113.10, 198.51.100.4, 192.0.2.7
+Private (must NOT fire): 10.0.0.1, 192.168.1.1, 127.0.0.1, 172.16.4.2
+Version string (must NOT fire): 1.2.3.4000

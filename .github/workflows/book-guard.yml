@@ -1,0 +1,131 @@
+# book-guard — the repository practising what it preaches.
+#
+# WHY THIS EXISTS AT ALL. This repo argues, at length, that `done` is a claim and only a
+# machine-checkable stop condition makes it a proof. Until this file existed, every claim
+# the book made about the tree — "71 skills", "34 hook scripts", "every diagram renders",
+# "no identifier survived" — was verified exactly once, by hand, by the person who wrote
+# it. That is precisely the maker-grading-their-own-homework failure chapter 6 is about.
+#
+# WHY NO PATH FILTER. A guard with a path filter is absent exactly when the unexpected
+# happens: a commit that adds a stray identifier to a memory file, or renames a skill
+# directory out from under a chapter's count, touches nothing a filter would predict.
+# There is no path filter here and there should never be one. The three fast jobs shell
+# out to Python and the filesystem — no dependency install, a few seconds each.
+#
+# WHAT EACH JOB PROVES, and the SANITIZATION.md round that paid for it:
+#   links    — the book's cross-references resolve; the frozen config trees are excluded
+#              by design (their dangling original-path links are documented authenticity).
+#   counts   — every number the prose claims still matches the tree. The in-repo
+#              quick-references that predate the book still say "~50 skills": that is what
+#              ungated prose does.
+#   leaks    — class-level rules that PROVE THEMSELVES on canaries in both directions
+#              before reporting. Stage 5: "A clean report from an untested tool is not
+#              evidence." No real identifier appears in the rules — stage 5 again: writing
+#              "term X was removed" puts term X back in the tree.
+#   mermaid  — every diagram through the REAL parser. Stage 4: a hand-written structural
+#              validator passed four diagrams that GitHub renders as red error boxes.
+#   gitleaks — an independent, third-party opinion on secrets. Maker ≠ checker applied to
+#              my own sweep: a tool I did not write, whose blind spots are not mine.
+name: book-guard
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: book-guard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  links:
+    name: links resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          filter: tree:0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python3 scripts/check-links.py
+
+  counts:
+    name: counts match the tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          filter: tree:0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python3 scripts/check-counts.py
+
+  leaks:
+    name: leak sweep (canary-proven)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          filter: tree:0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python3 scripts/check-leaks.py
+
+  gitleaks:
+    name: gitleaks (independent opinion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Pinned by version AND checksum, per the CI/CD guardrails: an unpinned installer is
+      # an unreviewed binary running against the whole history.
+      GITLEAKS_VERSION: '8.30.1'
+      GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0 # gitleaks scans history, so the treeless clone is not enough
+
+      - name: Install gitleaks (checksum-verified)
+        run: |
+          set -euo pipefail
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$tarball" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan working tree and history
+        run: gitleaks detect --source . --redact --verbose --exit-code 1
+
+  mermaid:
+    name: diagrams render
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          filter: tree:0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '22'
+
+      - name: Install mermaid-cli
+        run: npm install -g @mermaid-js/mermaid-cli@11.4.2
+
+      - name: Render every diagram
+        run: python3 scripts/check-mermaid.py

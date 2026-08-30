@@ -1,0 +1,4 @@
+A GUID-shaped value that is not the sanitized form:
+subscription: 7f3c1a92-4b8e-4d21-9c05-6ea8b7d41f30
+
+The sanitized form (must NOT fire): 00000000-0000-0000-0000-000000000042

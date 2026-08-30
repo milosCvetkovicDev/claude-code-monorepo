@@ -4,6 +4,7 @@
 sanitized configuration from seven months of shipping a production TypeScript monorepo.
 Organized as a book: read it high-level to low-level, cover to cover.**
 
+[![book-guard](https://github.com/milosCvetkovicDev/claude-code-monorepo/actions/workflows/book-guard.yml/badge.svg)](https://github.com/milosCvetkovicDev/claude-code-monorepo/actions/workflows/book-guard.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-configuration-d29922.svg)](https://docs.anthropic.com/en/docs/claude-code)
 [![Sanitized](https://img.shields.io/badge/sanitized-6_audit_rounds-success.svg)](SANITIZATION.md)
