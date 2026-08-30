@@ -1,0 +1,181 @@
+# mkdocs config for the online edition.
+#
+# docs_dir points at _build/docs, which site/build.py stages — nothing in the repository
+# moves to satisfy the site generator. See that script's header for why.
+site_name: claude-code-monorepo
+site_description: >-
+  The real Claude Code configuration behind a 13-service TypeScript platform,
+  organized as a 13-chapter book. Loop engineering: maker ≠ checker, verifiable
+  stop conditions.
+site_url: https://miloscvetkovicdev.github.io/claude-code-monorepo/
+repo_url: https://github.com/milosCvetkovicDev/claude-code-monorepo
+repo_name: milosCvetkovicDev/claude-code-monorepo
+edit_uri: ""
+
+docs_dir: _build/docs
+site_dir: _build/site
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    # Dark by default — it matches the social card and how most readers arrive.
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        # NOTE the class is `diagram`, not `mermaid`. Material's own mermaid integration
+        # keys on `.mermaid`: it empties the element and renders with a copy it fetches
+        # from unpkg at a floating major version. Verified by experiment — a preloaded
+        # window.mermaid does NOT make it stand down; the element just ends up blank when
+        # the CDN is unreachable. Using a class it does not claim leaves rendering to
+        # site/mermaid-init.js and the pinned, self-hosted build.
+        - name: mermaid
+          class: diagram
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/milosCvetkovicDev
+      name: milosCvetkovicDev on GitHub
+  generator: false
+
+extra_css:
+  - assets/extra.css
+
+# Self-hosted, checksum-pinned mermaid (see site/mermaid-init.js), rendering `.diagram`
+# fences that Material's CDN-backed integration deliberately does not claim.
+extra_javascript:
+  - assets/mermaid.min.js
+  - assets/mermaid-init.js
+
+nav:
+  - Cover: index.md
+  - Volume I — The Book:
+      - Contents: book/README.md
+      - Part I — The Idea:
+          - 1 · One engineer, thirteen services: book/01-one-engineer-thirteen-services.md
+          - 2 · Loops, not prompts: book/02-loops-not-prompts.md
+          - 3 · The six layers: book/03-the-six-layers.md
+      - Part II — The Layers:
+          - 4 · Context: book/04-context.md
+          - 5 · Skills: book/05-skills.md
+          - 6 · Agents: book/06-agents.md
+          - 7 · Hooks: book/07-hooks.md
+          - 8 · Connectors: book/08-connectors.md
+          - 9 · Memory: book/09-memory.md
+      - Part III — In Motion:
+          - 10 · The ceremony: book/10-the-ceremony.md
+          - 11 · An epic, start to finish: book/11-an-epic-start-to-finish.md
+          - 12 · Running many at once: book/12-running-many-at-once.md
+      - Part IV — What It Built:
+          - 13 · The system it built: book/13-the-system-it-built.md
+      - Appendices:
+          - A · Installing this setup: book/appendix-a-install.md
+          - B · Attribution and lineage: book/appendix-b-attribution-and-lineage.md
+          - The sanitization story: sanitization.md
+      - Deep-dives:
+          - Ultracode workflows: book/deep-dives/ultracode-workflows.md
+          - Worktree workspace allocation: book/deep-dives/worktree-workspace-allocation.md
+  - Volume II — Architecture:
+      - Catalogue: architecture/README.md
+      - Whole system:
+          - System context: architecture/00-system-context.md
+          - Container view: architecture/01-container-view.md
+      - Platform:
+          - Bounded contexts: architecture/platform/bounded-contexts.md
+          - Domain model: architecture/platform/domain-model.md
+          - Event catalog: architecture/platform/event-catalog.md
+          - Integration patterns: architecture/platform/integration-patterns.md
+      - Backend:
+          - Service anatomy: architecture/backend/01-service-anatomy.md
+          - API architecture: architecture/backend/02-api-architecture.md
+          - Data architecture: architecture/backend/03-data-architecture.md
+          - AuthN / AuthZ: architecture/backend/04-authn-authz.md
+          - Messaging: architecture/backend/05-messaging.md
+          - Caching: architecture/backend/06-caching.md
+      - Frontend:
+          - App architecture: architecture/frontend/01-app-architecture.md
+          - Design system: architecture/frontend/02-design-system.md
+          - State and data: architecture/frontend/03-state-and-data.md
+          - Routing and shell: architecture/frontend/04-routing-and-shell.md
+      - DevOps:
+          - GitOps topology: architecture/devops/01-gitops-topology.md
+          - Progressive delivery: architecture/devops/02-progressive-delivery.md
+          - CI pipeline: architecture/devops/03-ci-pipeline.md
+          - Infrastructure: architecture/devops/04-infrastructure.md
+          - Secrets and identity: architecture/devops/05-secrets-and-identity.md
+          - Observability: architecture/devops/06-observability.md
+          - Environments: architecture/devops/07-environments.md
+      - Legacy:
+          - Legacy architecture: architecture/legacy/01-legacy-architecture.md
+          - Strangler migration: architecture/legacy/02-strangler-migration.md
+      - Deep-dives:
+          - Overview: architecture/deep-dives/README.md
+          - Events — anatomy: architecture/deep-dives/events/01-event-anatomy.md
+          - Events — families: architecture/deep-dives/events/02-event-families.md
+          - Events — life of one event: architecture/deep-dives/events/03-the-life-of-one-event.md
+          - Events — evolution: architecture/deep-dives/events/04-event-evolution.md
+          - Events — choreography: architecture/deep-dives/events/05-choreography-decisions.md
+          - Broker — topology: architecture/deep-dives/rabbitmq/01-topology.md
+          - Broker — publishing: architecture/deep-dives/rabbitmq/02-publishing.md
+          - Broker — consuming: architecture/deep-dives/rabbitmq/03-consuming.md
+          - Broker — failure atlas: architecture/deep-dives/rabbitmq/04-failure-atlas.md
+          - Broker — testing: architecture/deep-dives/rabbitmq/05-testing-the-broker.md
+          - Tenancy — model: architecture/deep-dives/multi-tenancy/01-tenant-model.md
+          - Tenancy — resolution: architecture/deep-dives/multi-tenancy/02-resolution.md
+          - Tenancy — propagation: architecture/deep-dives/multi-tenancy/03-propagation.md
+          - Tenancy — enforcement: architecture/deep-dives/multi-tenancy/04-enforcement.md
+          - Tenancy — threat model: architecture/deep-dives/multi-tenancy/05-isolation-threat-model.md
+  - The worked epic:
+      - PRD: examples/epic-walkthrough/PRD.md
+      - Architecture: examples/epic-walkthrough/architecture.md
+      - Epic: examples/epic-walkthrough/epic.md
+      - Test manifest: examples/epic-walkthrough/test-manifest.md
+      - Readiness report: examples/epic-walkthrough/readiness-report.md
+      - GitHub mapping: examples/epic-walkthrough/github-mapping.md
+      - Execution status: examples/epic-walkthrough/execution-status.md

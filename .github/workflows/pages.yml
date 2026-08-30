@@ -1,0 +1,80 @@
+# pages — build and deploy the online edition of the book.
+#
+# UNLIKE book-guard, THIS ONE IS PATH-FILTERED, and deliberately so. book-guard has no
+# filter because a guard must run on the commit nobody predicted; a site build has the
+# opposite character — rebuilding the site for a commit that touches no published content
+# produces an identical artifact and a pointless deploy. The filter is an optimisation on
+# a job whose failure mode is "the site is briefly stale", not "a leak shipped".
+#
+# The build never mutates the repository. site/build.py STAGES the two volumes into a
+# scratch directory and rewrites links that would dangle there; nothing in book/,
+# docs/ or the frozen config trees moves to satisfy the site generator.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'book/**'
+      - 'docs/**'
+      - 'examples/**'
+      - 'README.md'
+      - 'SANITIZATION.md'
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Never cancel a deploy midway; let the previous one finish and queue behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          filter: tree:0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install mkdocs-material
+        run: pip install --disable-pip-version-check 'mkdocs-material==9.7.7'
+
+      - name: Stage both volumes
+        # --check fails the build if a link dangles inside the staged site, so a
+        # rewriting bug cannot ship as a 404 nobody notices.
+        run: python3 site/build.py --check
+
+      - name: Build
+        # --strict turns mkdocs warnings (missing nav targets, unresolvable links)
+        # into failures.
+        working-directory: site
+        run: mkdocs build --strict
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/_build/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

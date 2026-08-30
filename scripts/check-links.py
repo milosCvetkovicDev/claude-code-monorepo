@@ -21,8 +21,13 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Authored for this export → swept. Everything else is frozen or generated.
-SWEPT_DIRS = ("book", "docs", "examples", "scripts", ".github")
+SWEPT_DIRS = ("book", "docs", "examples", "scripts", ".github", "site")
 SWEPT_ROOT_FILES = ("README.md", "SANITIZATION.md", "NOTICE", "LICENSE")
+
+# Generated, not authored. site/_build holds a STAGED copy of the book whose links have
+# been deliberately rewritten for the website; sweeping it would double-count every link
+# and check the output of the rewriter against the wrong rules.
+SKIP_DIRS = {"_build", "_vendor", "node_modules", "leak-canaries"}
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)", re.S)
 SKIP_PREFIXES = ("http://", "https://", "mailto:", "#", "tel:")
@@ -33,7 +38,8 @@ def markdown_files():
         root_dir = os.path.join(REPO, d)
         if not os.path.isdir(root_dir):
             continue
-        for root, _dirs, files in os.walk(root_dir):
+        for root, dirs, files in os.walk(root_dir):
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
             for f in files:
                 if f.endswith(".md"):
                     yield os.path.join(root, f)

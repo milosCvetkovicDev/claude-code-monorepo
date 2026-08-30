@@ -1,0 +1,66 @@
+/* Small type/rhythm adjustments so the online edition reads like a book rather than
+   like API docs: a comfortable measure, calmer headings, and mermaid figures centred. */
+
+:root {
+  --md-text-font: "Inter";
+  --md-code-font: "JetBrains Mono";
+}
+
+/* A readable measure. Material's default content width is fine for reference docs and
+   too wide for 250-line prose chapters. */
+.md-typeset {
+  font-size: 0.78rem;
+  line-height: 1.72;
+}
+
+.md-grid {
+  max-width: 62rem;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.md-typeset h2 {
+  margin-top: 2.2em;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* The chapter nav line ("Part II — The Layers · ← Context · Contents · Next →") */
+.md-typeset blockquote:first-of-type {
+  border-left: none;
+  padding-left: 0;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.85em;
+}
+
+/* Diagrams are rendered by site/mermaid-init.js into .diagram-rendered (Material's own
+   .mermaid integration is deliberately not used — see mkdocs.yml). Mermaid emits an SVG
+   with intrinsic dimensions only; without an explicit width it lays out at zero. */
+/* Block, not flex. Mermaid emits `width="100%"` with a viewBox and NO height attribute;
+   inside a flex container that resolves to a zero-height box and the diagram vanishes
+   while still being present in the DOM. Block layout lets height:auto derive from the
+   viewBox aspect ratio. */
+.md-typeset .diagram-rendered {
+  display: block;
+  margin: 1.8em auto;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.md-typeset .diagram-rendered svg {
+  height: auto;
+  max-width: none; /* let it be its natural size; the container scrolls */
+}
+
+/* Until JS runs (or if it fails), show the source rather than an empty gap. */
+.md-typeset pre.diagram {
+  overflow-x: auto;
+}
+
+/* Tables carry a lot of this book's content; keep them legible when they get wide. */
+.md-typeset table:not([class]) {
+  font-size: 0.72rem;
+}
