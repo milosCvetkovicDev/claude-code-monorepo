@@ -43,6 +43,39 @@ skills below, and they are the two smallest files doing the most work in this re
 
 ## The two loops
 
+One finds work; the other proves work is finished. Between them they cover the two
+questions a human would otherwise answer by hand all day — *what should I do next?* and
+*is this actually done?* **Hexagons are graded by an agent that did not do the work**:
+
+```mermaid
+flowchart LR
+    subgraph discovery["triage — the discovery loop"]
+        direction TB
+        scan["scan repo health<br/>read-only script"] --> classify{"AUTO or<br/>INBOX?"}
+        classify -->|"safe-category<br/>allowlist"| maker1["maker<br/>isolated worktree"]
+        classify -->|"everything else"| inbox[("ranked inbox<br/>on disk")]
+        maker1 --> checker1{{"checker<br/>a different agent"}}
+        checker1 -->|pass| pr["open PR<br/>never merge"]
+        checker1 -->|"reject twice"| inbox
+    end
+
+    subgraph verification["verify-loop — the verification loop"]
+        direction TB
+        cond["verifiable stop condition<br/>a command that exits 0"] --> maker2["maker turn<br/>smallest increment"]
+        maker2 --> checker2{{"checker turn<br/>gets evidence only,<br/>tries to refute"}}
+        checker2 -->|"met: false"| maker2
+        checker2 -->|"met: true"| done[("done, with proof")]
+    end
+
+    inbox -.->|"feeds new work"| cond
+    human(["human"]) -->|"reads inbox"| inbox
+    pr --> human
+```
+
+Note what the diagram makes obvious that prose has to spell out: **no path reaches a
+finished state without passing through a hexagon the maker does not control**, and the
+human sits on the only edge that leads out.
+
 ### Loop 1 — `triage`: discovery
 
 [`project/.claude/skills/triage/`](../project/.claude/skills/triage/SKILL.md) is a system

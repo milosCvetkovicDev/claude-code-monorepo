@@ -136,7 +136,45 @@ recommended into T1), 5 MINOR, each with an owner and a timing.
 
 `/pm:epic-sync` created issue #1623 with real child issues #1624–#1633. Then
 execution planning did something quietly sophisticated: it read the tasks'
-`conflicts_with` edges and **graph-coloured them into waves** — five mutually
+`conflicts_with` edges and **graph-coloured them into waves**:
+
+```mermaid
+flowchart LR
+    subgraph w0["Wave 0"]
+        t1624["#1624<br/>RED baseline"]
+    end
+    subgraph w1["Wave 1 — mutually non-conflicting"]
+        t1625["#1625 write-back<br/>PILOT"]
+        t1626["#1626 inventory<br/>idempotency"]
+        t1627["#1627 quota<br/>serialization"]
+        t1629["#1629 soft delete<br/>+ audit"]
+        t1630["#1630 list<br/>contract fidelity"]
+    end
+    subgraph w2["Wave 2 — solo"]
+        t1628["#1628 safe mutations<br/>conflicts with 3 of Wave 1"]
+    end
+    subgraph w3["Wave 3 — solo"]
+        t1631["#1631 command<br/>completeness"]
+    end
+    subgraph w4["Wave 4"]
+        t1632["#1632 observability"]
+    end
+    subgraph w5["Final"]
+        t1633["#1633 prod-verify<br/>+ 48h soak"]
+    end
+
+    t1624 --> w1 --> t1628 --> t1631 --> t1632 --> t1633
+
+    t1628 -.->|conflicts| t1627
+    t1628 -.->|conflicts| t1629
+    t1631 -.->|conflicts| t1629
+    t1631 -.->|conflicts| t1630
+    t1632 -.->|depends on| t1625
+```
+
+Dotted edges are the `conflicts_with` declarations; the waves are what falls out once you
+respect them. #1628 and #1631 each conflict with three of their neighbours, so they run
+alone — a scheduling fact derived from the task files, not a judgement call made at 6pm. — five mutually
 non-conflicting tasks in Wave 1; #1628 alone in Wave 2 (it conflicts with three);
 #1631 alone in Wave 3; observability after its dependencies; prod-verify last. The
 status file also records a judgment call *against* the default tooling:

@@ -38,7 +38,40 @@ will want even without the tooling:
 | **judge panel**         | N independent attempts → parallel judges score → synthesize            | wide solution spaces (architecture, design)          |
 | **completeness critic** | a final agent asks "what's missing?"                                   | before claiming any sweep is done                    |
 
-Two of these deserve a longer look, because they are maker ≠ checker industrialized.
+The first two are worth comparing directly, because choosing wrong is the most common
+and most expensive mistake in the list:
+
+```mermaid
+flowchart LR
+    subgraph pipe["pipeline() — the default, no barrier"]
+        direction TB
+        pA["item A"] --> pA1["stage 1"] --> pA2["stage 2"] --> pAd["done"]
+        pB["item B"] --> pB1["stage 1"] --> pB2["stage 2"] --> pBd["done"]
+        pC["item C"] --> pC1["stage 1"] --> pC2["stage 2"] --> pCd["done"]
+        note1["A can be in stage 2<br/>while C is still in stage 1.<br/>Wall-clock = slowest single chain."]
+    end
+
+    subgraph bar["parallel() — a barrier"]
+        direction TB
+        bA["item A"] --> bA1["stage 1"]
+        bB["item B"] --> bB1["stage 1"]
+        bC["item C"] --> bC1["stage 1"]
+        bA1 --> wait{{"await ALL"}}
+        bB1 --> wait
+        bC1 --> wait
+        wait --> after["stage 2 — needs the whole set<br/>(dedup, total count, early-exit)"]
+        note2["The fastest item waits for the slowest.<br/>Correct ONLY when stage 2 genuinely<br/>needs cross-item context."]
+    end
+
+    pipe ~~~ bar
+```
+
+The smell test: if you wrote `parallel()`, then a plain `map`/`filter`/`flatten`, then
+another `parallel()` — that middle transform did not need the barrier. Do it inside a
+pipeline stage instead. "I need to flatten first" is not cross-item context; "compare
+each finding against all the others" is.
+
+Two patterns deserve a longer look, because they are maker ≠ checker industrialized.
 
 **Port→verify** (the pattern that drove a real design-system alignment epic): each
 maker agent writes *only its own* component triplet — implementation, story, spec —

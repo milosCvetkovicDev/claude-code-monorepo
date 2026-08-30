@@ -30,6 +30,39 @@ From [`global/CLAUDE.md`](../global/CLAUDE.md) — the sequence, memorized as on
 > [`readiness-check`] → `epic-sync` → `issue-start` → `issue-close` → `epic-review` →
 > `epic-merge` → `prod-verify` → `epic-close`
 
+Drawn out, the alternation is the point — no two consecutive steps trust the same mind.
+**Hexagons are graded by someone other than the author**; rectangles are where work is
+made:
+
+```mermaid
+flowchart LR
+    subgraph define["Define"]
+        direction TB
+        prd["prd-new · prd-parse"] --> arch{{"arch-create<br/>judge panel"}}
+    end
+    subgraph arm["Decompose and arm"]
+        direction TB
+        dec["epic-decompose"] --> tests["tests-generate<br/>RED suites — the hinge"] --> ready{{"readiness-check<br/>independent gate"}}
+    end
+    subgraph exec["Execute"]
+        direction TB
+        sync["epic-sync · issue-start<br/>makers in worktrees"] --> close{{"issue-close<br/>checker confirms<br/>RED→GREEN"}}
+    end
+    subgraph land["Verify and land"]
+        direction TB
+        review{{"epic-review<br/>adversarial"}} --> merge["epic-merge<br/>through the checks"] --> verify{{"prod-verify<br/>on real evidence"}} --> epicclose["epic-close"]
+    end
+
+    define --> arm
+    ready -->|"NOT READY"| dec
+    ready -->|READY| exec --> land
+    epicclose -->|"every leftover"| triage[("triage inbox")]
+```
+
+`tests-generate` is the hinge: the step that converts the PRD's acceptance criteria into
+a machine-checkable definition of done, which every hexagon downstream then measures
+against. Note there is no arrow out of this diagram that skips one.
+
 Grouped by what they accomplish:
 
 **Define** — `/pm:prd-new` interviews the requirement into a PRD with Gherkin

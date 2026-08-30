@@ -27,8 +27,35 @@ and that redundancy is a pattern, not an accident.
 
 ## One request through all six layers
 
-The layers are easiest to feel by tracing a single, ordinary request. Suppose the user
-types: *"the invoice list is showing deleted rows — fix it."*
+Drawn in the order the layers *act* — which is not the order they are usually listed.
+**Hexagons are mechanical**: the model does not get a vote. Rectangles are advisory —
+read, then decided upon:
+
+```mermaid
+flowchart LR
+    user(["“the invoice list is showing<br/>deleted rows — fix it”"])
+
+    subgraph before["before the first token"]
+        direction TB
+        hooks1{{"4 · Hooks — SessionStart<br/>git synced · Docker checked<br/>PRs + triage inbox loaded"}}
+        ctx["1 · Context — resident<br/>use Nx, never bare jest;<br/>confirm destructive commands"]
+    end
+
+    route["2 · Skills — bug-fix<br/>reproduce → failing test → fix"]
+    work["3 · Agents<br/>mikroorm-expert advises;<br/>adversarial-reviewer grades the diff"]
+    guard{{"4 · Hooks — every tool call<br/>auto-format · validate · block<br/>Stop: affected tests must run"}}
+    check["5 · Connectors<br/>query the real schema via MCP,<br/>within permission bounds"]
+    mem[("6 · State<br/>the durable lesson →<br/>memory + index")]
+
+    user --> before --> route --> work --> guard --> check --> mem
+    mem -.->|"next session starts<br/>already knowing"| ctx
+```
+
+The cylinder is what makes tomorrow's session start further along than today's did —
+without it, the loop back to `Context` never closes and every month repeats the last one.
+
+In prose, the same trip. Suppose the user types: *"the invoice list is showing deleted
+rows — fix it."*
 
 **Before the first token**, layer 4 has already acted: `SessionStart` hooks synced git,
 verified the Node version, checked Docker, loaded open PRs and issues into context, and
