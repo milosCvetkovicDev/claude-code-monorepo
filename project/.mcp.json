@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "azure": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@azure/mcp@latest", "server", "start", "--transport", "stdio"]
+    },
+    "acme-mcp": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["run", "apps/acme-mcp/src/index.ts"],
+      "env": {
+        "DB_HOST": "${DB_HOST:-localhost}",
+        "DB_PORT": "${DB_PORT:-5433}",
+        "DB_USERNAME": "${DB_USERNAME:-legacy}",
+        "DB_PASSWORD": "${DB_PASSWORD:-}",
+        "DB_NAME": "${DB_NAME:-legacy_development}",
+        "LOG_LEVEL": "${LOG_LEVEL:-info}",
+        "AZURE_LOG_ANALYTICS_WORKSPACE_ID_DEV": "00000000-0000-0000-0000-000000000001",
+        "AZURE_SUBSCRIPTION_ID_DEV": "00000000-0000-0000-0000-000000000002",
+        "AZURE_LOG_ANALYTICS_WORKSPACE_ID_PROD": "00000000-0000-0000-0000-000000000003",
+        "AZURE_SUBSCRIPTION_ID_PROD": "00000000-0000-0000-0000-000000000002"
+      }
+    }
+  }
+}

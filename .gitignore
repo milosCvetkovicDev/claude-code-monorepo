@@ -1,0 +1,22 @@
+# local-only Claude Code state — never commit
+settings.local.json
+**/settings.local.json
+*.bak
+*.bak.*
+*.prebackup
+
+# sanitization working files
+.sanitize-log*.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# runtime
+node_modules/
+.claude/triage/
+.claude/tmp/
+.claude/worktrees/

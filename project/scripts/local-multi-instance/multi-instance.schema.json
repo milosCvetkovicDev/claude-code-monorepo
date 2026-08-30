@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/acme-worktree/multi-instance.schema.json",
+  "title": "acme-worktree multi-instance configuration",
+  "description": "Registry and derivation rules for the worktree workspace allocator. One integer per worktree (the instance number) derives every port, database name and container project name, so several checkouts of one repository can run at the same time without colliding.",
+  "type": "object",
+  "required": ["instances", "portAllocation", "defaults", "paths"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "$comment": { "type": "string" },
+
+    "instances": {
+      "type": "object",
+      "description": "The registry. Managed by the CLI — prefer `create`, `remove` and `doctor --adopt` over editing by hand. Keys are worktree NAMES: the directory name with paths.worktreePrefix stripped.",
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["instance"],
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The allocated slot. 1 is reserved for the main repository and is never freed. Must be unique across the registry — two entries sharing a number is exactly the port collision this file exists to prevent."
+          },
+          "azureAlias": {
+            "type": ["string", "null"],
+            "maxLength": 20,
+            "description": "Short alias for cloud resource names, derived from the worktree name's initials. Null for the primary instance, which has no cloud footprint of its own."
+          },
+          "description": {
+            "type": "string",
+            "description": "Free text, usually the branch the worktree was created for."
+          }
+        }
+      }
+    },
+
+    "portAllocation": {
+      "type": "object",
+      "description": "Base port per service. The allocated port is base + (instance - 1). Two bases must stay further apart than maxInstances, or their ranges overlap at high instance numbers.",
+      "required": ["backend", "frontend", "database"],
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 65535
+      },
+      "properties": {
+        "$comment": { "type": "string" },
+        "backend": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "frontend": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "domainApi": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "domainApiDb": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "database": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "azurite": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+
+    "defaults": {
+      "type": "object",
+      "description": "Naming and ceiling rules.",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "dbNamePrefix": {
+          "type": "string",
+          "description": "Prefix for non-primary databases. Final name is prefix + worktree name with hyphens replaced by underscores."
+        },
+        "projectNamePrefix": {
+          "type": "string",
+          "description": "Prefix for the Docker Compose project name, which is what keeps container names from colliding between workspaces."
+        },
+        "primaryDbName": {
+          "type": "string",
+          "description": "Database name for instance 1, which does not follow the prefix rule."
+        },
+        "domainApiDbUser": {
+          "type": "string",
+          "description": "Used only to compose a DATABASE_URL template when the domain API has no .env yet. An existing DATABASE_URL never has its credentials rewritten — only its host and port."
+        },
+        "domainApiDbName": {
+          "type": "string",
+          "description": "Database name in that same template."
+        },
+        "maxInstances": {
+          "type": "integer",
+          "minimum": 2,
+          "description": "Allocator ceiling. Allocation fails once every slot from 2 to this number is taken. Raising it is only safe while the port bases stay further apart than the new ceiling."
+        }
+      }
+    },
+
+    "paths": {
+      "type": "object",
+      "description": "Filesystem layout. A leading ~ is expanded when the config is read.",
+      "required": ["mainRepo", "worktreeRoot", "worktreePrefix"],
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "mainRepo": {
+          "type": "string",
+          "description": "The primary checkout. Its directory name is the registry key of instance 1."
+        },
+        "worktreeRoot": {
+          "type": "string",
+          "description": "Directory holding the sibling worktrees."
+        },
+        "worktreePrefix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory-name prefix identifying a managed worktree. Worktrees not matching it are reported as unmanaged rather than silently skipped."
+        }
+      }
+    },
+
+    "apps": {
+      "type": "object",
+      "description": "Repo-relative application directories. Each is optional: a generated file is written only when its directory exists in the worktree, so a repository with a subset of these still works.",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "backend": { "type": "string" },
+        "frontend": { "type": "string" },
+        "e2e": { "type": "string" },
+        "domainApi": { "type": "string" }
+      }
+    }
+  }
+}

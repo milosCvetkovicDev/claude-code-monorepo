@@ -1,0 +1,9 @@
+claude-code-monorepo — Copyright (c) 2026 Milos Cvetkovic, MIT License (see LICENSE).
+
+Portions of this repository derive from third-party projects under their own
+licenses, preserved alongside the code they cover:
+
+- global/commands/pm/**  and global/scripts/pm/**  — CCPM (automazeio/ccpm), MIT;
+  see global/commands/pm/LICENSE and global/commands/pm/NOTICE.md
+- global/skills/kubernetes-skill/**  — LukasNiessen/kubernetes-skill, MIT;
+  see global/skills/kubernetes-skill/LICENSE and VENDORED.md

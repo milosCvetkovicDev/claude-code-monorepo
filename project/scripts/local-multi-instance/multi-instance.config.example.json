@@ -1,0 +1,47 @@
+{
+  "$schema": "./multi-instance.schema.json",
+  "$comment": "Example configuration for multi-instance development. Copy to multi-instance.config.json (or point $ACME_WORKTREE_CONFIG at your own copy) and edit paths/apps. The registry under .instances is managed by the acme-worktree CLI — keys are worktree NAMES, i.e. the directory name with paths.worktreePrefix stripped.",
+  "instances": {
+    "acme": {
+      "instance": 1,
+      "azureAlias": null,
+      "description": "Primary development instance (reserved — slot 1 is the main repo and is never freed)"
+    },
+    "billing-rollup": {
+      "instance": 2,
+      "azureAlias": "dev-br",
+      "description": "Worktree for feat/billing-rollup"
+    }
+  },
+  "portAllocation": {
+    "$comment": "Port = base + (instance - 1). One integer per worktree therefore derives every port, so nothing collides. Bases must stay further apart than maxInstances: backend 3000 and domainApi 3200 are 200 apart, so they would overlap at instance 201.",
+    "backend": 3000,
+    "frontend": 4200,
+    "domainApi": 3200,
+    "domainApiDb": 5444,
+    "database": 5433,
+    "azurite": 10000
+  },
+  "defaults": {
+    "$comment": "maxInstances is the allocator ceiling: create fails with 'No available instance numbers' once every slot from 2..maxInstances is taken. Raise it only if the port bases above stay further apart than the new ceiling. Instance 1 uses primaryDbName; every other instance gets dbNamePrefix + the worktree name with hyphens turned into underscores. domainApiDbUser/Name are used ONLY to compose a DATABASE_URL template when the domain API has no .env yet — an existing DATABASE_URL never has its credentials rewritten, only its host:port.",
+    "dbNamePrefix": "app_dev_",
+    "projectNamePrefix": "acme",
+    "primaryDbName": "app_development",
+    "domainApiDbUser": "app",
+    "domainApiDbName": "domain_development",
+    "maxInstances": 10
+  },
+  "paths": {
+    "$comment": "A leading ~ is expanded when the config is read. Non-primary worktrees live at <worktreeRoot>/<worktreePrefix><name>; mainRepo's own directory name is the registry key of the primary instance (here: acme).",
+    "mainRepo": "~/projects/acme",
+    "worktreeRoot": "~/projects",
+    "worktreePrefix": "acme-"
+  },
+  "apps": {
+    "$comment": "Repo-relative app directories. Each is optional: a generated file is only written when its directory exists in the worktree, so a consumer with two of these four still works.",
+    "backend": "apps/legacy-api",
+    "frontend": "apps/legacy-web",
+    "e2e": "apps/legacy-web-e2e",
+    "domainApi": "apps/domain-api"
+  }
+}

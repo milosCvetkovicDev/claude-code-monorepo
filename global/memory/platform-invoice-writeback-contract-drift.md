@@ -1,0 +1,19 @@
+---
+name: platform-invoice-writeback-contract-drift
+description: "accounting.invoice.processed → trading write-back (#1625) has systemic contract/domain drift — not a trivial producer fix; entity-granularity is an unresolved domain question"
+metadata:
+  node_type: memory
+  type: project
+  originSessionId: 00000000-0000-0000-0000-000000000017
+---
+
+The [[platform-trading-hardening-epic]] #1625 invoice write-back (trading consumes `accounting.invoice.processed`) is **non-functional against the real producer** — expert review (PR #1634) flagged it, and deeper tracing found it is **systemic**, not a missing-field fix:
+
+1. **Producer omits the fields entirely.** `accounting-service/erp-posting.worker.ts` (both publish sites) emits `{invoiceId, erpUrn, referenceNumber, type, idempotent}`. The TS contract `InvoiceProcessedEventPayload` (event-contracts) declares `{invoiceId, sourceEntityType, sourceEntityId, erpUrn, processedAt, tenantId}`. The trading handler reads `sourceEntityType/sourceEntityId/tenantId/processedAt` → all `undefined` → parks `UNRESOLVABLE_ENTITY`.
+2. **3-way drift.** Contract (above) vs producer (above) vs the accounting **provider pact** (`accounting-provider.pact.spec.ts` / `accounting-consumers-...json`) which documents `{invoiceId, dealId, type, tenantId, erpUrn}`. None agree.
+3. **Value casing.** The producer persists `sourceEntityType` title-case; the trading handler `switch`es on the UPPERCASE spelling of the same enum. Same value, different casing → the event still parks even once the field is emitted.
+4. **Entity granularity (a DOMAIN question — do NOT guess).** The producer stores an **aggregate-level** id in `sourceEntityId`; the #1625 handler does a `findOne` against a **child** entity of that aggregate with it. Which of the two the write-back should mark is a business rule, not something to infer from the code — and in a money domain the cost of guessing is not a rounding error. (The rule itself is business policy and is not part of this export.)
+
+**RESOLVED 2026-07-03 (commit `71a554d7` on PR #1634, coupled per user Option 1; independently adversarially verified, mergeRecommend=yes; merge HELD for user go).** Turned out NOT to need a contract change: `event-contracts` `InvoiceProcessedEventPayload` already declared the right 6-field shape — only the PRODUCER was wrong. Fix = (1) `erp-posting.worker.ts` BOTH publish sites now emit `buildProcessedEventPayload(invoice, erpUrn)` typed as `publish<InvoiceProcessedEventPayload>` (typing the publish is the ROOT-CAUSE fix — the original drift shipped silently because `publish<T>` inferred `T` from the literal); (2) casing fixed at the EMIT site via `toCanonicalSourceEntityType`, NOT by loosening the handler; (3) accounting provider pact reshaped to the contract (trading consumer pact was already aligned); (4) new `invoice-writeback-producer-shape.tc.spec.ts` boots the REAL fail-closed tenant filter + drives a producer-shaped event → asserts the state transition lands + zero parked. The granularity question was settled against the documented rule rather than by reading the handler, and the handler turned out to already match it. My earlier "mechanically trivial" framing was wrong (it was systemic); the eventual fix was producer-only because the contract was already right.
+
+**FOLLOW-UP (out of scope, same bug class):** `accounting.invoice.failed` publish (`erp-posting.worker.ts:285`) still emits an UNTYPED legacy `{invoiceId,referenceNumber,type,errorMessage,retryCount}` that does NOT match `InvoiceFailedEventPayload {invoiceId,failureReason,failedAt,tenantId}`. Same silent-drift mechanism (untyped `publish`). Worth a dedicated fix. Also: `accounting-service/test/pact/pacts/platform-frontend-accounting-service.json` is an untracked, non-gitignored generated pact — gitignore or remove.

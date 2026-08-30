@@ -1,0 +1,8 @@
+# Both findings are deliberately-fake credentials inside "what NOT to do"
+# teaching material. Neither is, or ever was, a real secret.
+#
+#   examples-bad.md    — a Kubernetes ConfigMap anti-pattern. The AWS value is
+#                        Amazon's own published example key.
+#   review-checklists.md — a hardcoded-secret example in a code-review checklist.
+global/skills/kubernetes-skill/references/examples-bad.md:generic-api-key:220
+project/.claude/skills/code-review/references/review-checklists.md:generic-api-key:65

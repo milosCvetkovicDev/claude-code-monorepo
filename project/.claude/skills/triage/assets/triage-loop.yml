@@ -1,0 +1,71 @@
+# =============================================================================
+# OPT-IN TEMPLATE — NOT ACTIVE.
+# This file lives in .claude/skills/triage/assets/ so GitHub does NOT run it.
+# It is the "keep the loop running after you close the laptop" automation the
+# loop-engineering article endorses (GitHub Actions as the scheduler).
+#
+# To activate (deliberately, not by accident):
+#   1. Read ~/.claude/references/cicd/github-actions-patterns.md and verified-versions.md
+#      (per ~/.claude/rules/cicd-guardrails.md — this is mandatory before touching CI).
+#   2. SHA-pin every action below (replace the @tag refs with full SHAs from verified-versions.md).
+#   3. Add an ANTHROPIC_API_KEY (or OAuth) secret with a scoped, low-budget key — token cost on a
+#      schedule is real; the article's #1 unattended-loop risk.
+#   4. Confirm the runner: prefer the self-hosted runner with GitHub-hosted fallback (see CLAUDE.md).
+#   5. Copy to .github/workflows/triage-loop.yml and open a PR for review like any CI change.
+#
+# Default posture below is READ-ONLY (writes the inbox to a tracking issue, opens NO code PRs).
+# Flip TRIAGE_MODE to auto-pr only after you trust it — BRANCH PROTECTION (not token scope) prevents merge.
+# =============================================================================
+name: Triage Loop (template — inactive)
+
+on:
+  workflow_dispatch: {}      # manual only by default
+  # schedule:
+  #   - cron: "47 6 * * 1-5"  # ~06:47 UTC weekdays — off the :00 mark on purpose
+
+permissions:
+  contents: read # read-only default; auto-pr needs `contents: write` to PUSH the fix branch
+  issues: write # to upsert the triage-inbox issue (only for durable=github-issue; drop to read for durable=file)
+  pull-requests: read # auto-pr needs `pull-requests: write` to open the PR
+  # `contents: write` is REQUIRED for auto-pr to push a branch — but it ALSO permits merge via the
+  # API, so it is NOT a merge backstop. BRANCH PROTECTION on main (required reviews + checks) is what
+  # prevents merge. Prefer a dedicated bot/App token scoped to push + open-PR with NO admin/merge.
+
+concurrency:
+  group: triage-loop
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest    # swap to your self-hosted label once SHA-pinning is done
+    timeout-minutes: 20
+    env:
+      TRIAGE_MODE: read-only  # read-only | auto-pr
+      TRIAGE_LOOKBACK_HOURS: "36"
+    steps:
+      - name: Checkout
+        # TODO before activating: SHA-pin from verified-versions.md — format: actions/checkout@<full-sha> # v4.x.x
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run read-only discovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .claude/skills/triage/scripts/discover.sh | tee /tmp/triage-report.md
+
+      - name: Drive triage skill (headless Claude Code)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Headless run of the triage skill. In CI the durable inbox is a GitHub issue
+          # (labelled `triage-inbox`), since the .claude/triage/ file is git-ignored and
+          # does not survive a fresh checkout. Keep allowed tools tight.
+          # read-only mode: Read,Bash,Grep,Glob is sufficient (this is the default below).
+          # auto-pr mode ALSO needs Edit,Write,Task for the maker→checker pipeline AND a
+          # contents:write + pull-requests:write token. The block-dangerous-commands hook still
+          # gates `gh pr merge`/approve (ALLOW_PR_MERGE=1), so even a write token cannot merge.
+          claude -p "/triage mode=$TRIAGE_MODE durable=github-issue" \
+            --allowedTools "Read,Bash,Grep,Glob" \
+            --max-turns 30

@@ -1,0 +1,140 @@
+{
+  "cleanupPeriodDays": 30,
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "GIT_EDITOR": "true",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_MERGE_AUTOEDIT": "no",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-sonnet-4-6"
+  },
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "allow": [
+      "Bash(psql -h prod-acme-postgres.postgres.database.azure.com:*)",
+      "Bash(PGPASSWORD=\"$DB_PASSWORD\" psql -h prod-acme-postgres.postgres.database.azure.com:*)",
+      "Bash(psql -h localhost:*)",
+      "Bash(psql -h 127.0.0.1:*)",
+      "Bash(az keyvault *)",
+      "Bash(az containerapp *)",
+      "Bash(az webapp *)",
+      "Bash(az aks *)",
+      "Bash(gtimeout 15 az webapp log tail --name prod-acme-legacy-api-web-app --resource-group prod-acme-rg)",
+      "Bash(az monitor *)",
+      "Bash(az resource *)",
+      "Bash(az network *)",
+      "Read(/~/.claude/references/cicd/**)",
+      "Bash(terraform -chdir=infra/modules/network fmt main.tf)",
+      "Bash(terraform -chdir=infra/modules/network validate)",
+      "Bash(terraform -chdir=infra/modules/app-insights fmt main.tf)",
+      "Bash(terraform -chdir=infra/modules/app-insights validate)"
+    ],
+    "deny": [
+      "Read(/~/.ssh/**)",
+      "Read(/~/.aws/**)",
+      "Read(/~/.azure/**)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./**/id_rsa)",
+      "Read(./**/.env.production)",
+      "Read(./**/.env.production.local)"
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh",
+    "padding": 1
+  },
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": false,
+    "github@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "pr-review-toolkit@claude-plugins-official": true,
+    "hookify@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": false,
+    "ralph-loop@claude-plugins-official": false,
+    "typescript-lsp@claude-plugins-official": true,
+    "qodo-skills@claude-plugins-official": false,
+    "microsoft-docs@claude-plugins-official": false,
+    "remember@claude-plugins-official": false,
+    "claude-code-setup@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": true,
+    "playground@claude-plugins-official": true,
+    "learning-output-style@claude-plugins-official": false,
+    "sonatype-guide@claude-plugins-official": false,
+    "firecrawl@claude-plugins-official": false,
+    "semgrep@claude-plugins-official": false,
+    "explanatory-output-style@claude-plugins-official": false,
+    "vercel@claude-plugins-official": false,
+    "context7@claude-plugins-official": true,
+    "serena@claude-plugins-official": false,
+    "circleback@claude-plugins-official": false,
+    "chrome-devtools-mcp@claude-plugins-official": false,
+    "sourcegraph@claude-plugins-official": false,
+    "terraform@claude-plugins-official": false,
+    "plugin-dev@claude-plugins-official": false,
+    "skill-creator@claude-plugins-official": false,
+    "agent-sdk-dev@claude-plugins-official": false,
+    "mcp-server-dev@claude-plugins-official": false,
+    "linear@claude-plugins-official": false,
+    "security-guidance@claude-plugins-official": false,
+    "playwright@claude-plugins-official": true,
+    "lua-lsp@claude-plugins-official": false,
+    "pyright-lsp@claude-plugins-official": false,
+    "huggingface-skills@claude-plugins-official": false,
+    "agent-skills@addy-agent-skills": true
+  },
+  "extraKnownMarketplaces": {
+    "addy-agent-skills": {
+      "source": {
+        "source": "github",
+        "repo": "addyosmani/agent-skills"
+      }
+    }
+  },
+  "spinnerTipsEnabled": true,
+  "spinnerVerbs": {
+    "mode": "replace",
+    "verbs": [
+      "Conjuring",
+      "Brewing",
+      "Forging",
+      "Weaving",
+      "Channeling",
+      "Sculpting",
+      "Architecting",
+      "Manifesting",
+      "Synthesizing",
+      "Transmuting",
+      "Orchestrating",
+      "Distilling",
+      "Crystallizing",
+      "Incanting",
+      "Materializing",
+      "Harmonizing",
+      "Illuminating",
+      "Catalyzing",
+      "Alchemizing",
+      "Enchanting"
+    ]
+  },
+  "alwaysThinkingEnabled": true,
+  "effortLevel": "xhigh",
+  "skipWorkflowUsageWarning": true,
+  "theme": "dark-ansi",
+  "agentPushNotifEnabled": true,
+  "autoMode": {
+    "environment": [
+      "Organization: Initech Ltd (trading platform company). Primary use: full-stack software development on the Acme monorepo (NestJS backend, React frontend, commission API).",
+      "Source control: GitHub org github.com/initech-trading-platform — the acme repo is the primary monorepo. Pushing to any repo in this org is acceptable (subject to branch protection rules). All repos are company-owned.",
+      "Cloud provider: Microsoft Azure. Subscription used for AKS, Azure Container Apps, Azure PostgreSQL, Azure Key Vault, Application Insights, Azure Container Registry.",
+      "Trusted internal domains: acme-*.azurewebsites.net, initech*.azurewebsites.net (company Azure Web Apps only, not all of *.azurewebsites.net).",
+      "Trusted cloud buckets: None — no Azure Blob Storage is used by the development workflow.",
+      "Key internal services: GitHub Actions (CI/CD, triggering workflows on acme repo is allowed), ArgoCD (GitOps deployments, read-only unless user confirms), Terraform Cloud (infrastructure, plan is allowed but apply requires confirmation), SonarQube (code quality, read-only), npm registry (read-only, publishing requires explicit user confirmation).",
+      "Infrastructure as code: Terraform files (infra/ directory), Helm charts (charts/ directory), Kubernetes manifests. Editing these files is normal development work, but applying them to live infrastructure requires explicit user confirmation. This includes: terraform apply/destroy, helm upgrade/uninstall, kubectl apply/delete, argocd sync/app delete.",
+      "Local development: Nx monorepo with multiple apps (legacy-api, legacy-web, domain-api, domain-web). Docker Compose for local services. Multiple git worktrees managed via acme-worktree (a custom internal bash script for creating isolated development worktrees within the acme repo)."
+    ]
+  }
+}

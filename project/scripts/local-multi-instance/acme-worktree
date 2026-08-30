@@ -1,0 +1,1405 @@
+#!/bin/bash
+# ============================================================================
+#  acme-worktree — Create/remove git worktrees with shared Claude config
+#                  AND multi-instance development environment setup
+#
+#  Usage:
+#    acme-worktree create <name> [branch]    Create worktree + configure env
+#    acme-worktree remove <name>             Remove worktree + free instance
+#    acme-worktree list                      List worktrees with instance info
+#    acme-worktree open <name>               Open worktree in tmux + claude
+#    acme-worktree configure [name]          Re-generate env files for instance
+#    acme-worktree status [name]             Show detailed instance info
+#    acme-worktree doctor [--dry-run] [--adopt]
+#                                            Reconcile registry with disk, both directions
+#
+#  Examples:
+#    acme-worktree create billing-rollup feat/billing-rollup
+#    acme-worktree create hotfix main
+#    acme-worktree create experiment        # creates new branch "experiment"
+#    acme-worktree open billing-rollup
+#    acme-worktree configure                # configure current directory
+#    acme-worktree status billing-rollup
+#    acme-worktree remove billing-rollup
+#
+#  Configuration:
+#    multi-instance.config.json, next to this script (or $ACME_WORKTREE_CONFIG).
+#    Copy multi-instance.config.example.json to start.
+#    Requires: jq, git, tmux
+# ============================================================================
+
+# File-level shellcheck suppressions. Each is a deliberate property of the code,
+# not an oversight:
+# shellcheck disable=SC2059
+#   colour escapes are carried in the printf format string throughout. Ported as-is
+#   from the original. Note this is NOT purely colour constants: a few summary lines
+#   also interpolate a worktree name or path into the format string, so a name
+#   containing a percent sign or a backslash would mis-render. Harmless for the names
+#   this tool creates, but it is a real limitation rather than a false positive.
+# shellcheck disable=SC2162
+#   `read -p` without -r: these are interactive human prompts (branch type,
+#   y/N confirmations), never a channel for backslash-bearing data.
+# shellcheck disable=SC2155
+#   one `local x="$(git ...)"`, kept as-is; a failure there is already fatal
+#   under `set -e` before the value is used.
+# shellcheck disable=SC2221,SC2222
+#   the uncommitted-change triage in `remove` lists each cache/build path in
+#   three spellings (dir, dir/, dir/*) on purpose — the redundancy documents
+#   the category and is cheaper than getting the glob subtly wrong.
+# shellcheck disable=SC2004
+#   `wt_names[$i]=` in the interactive pickers, ported verbatim.
+
+set -euo pipefail
+
+# ── Config discovery ────────────────────────────────────────────────────────
+# ADDITION (not in the original): resolve through symlinks so the script can be
+# symlinked onto $PATH and still find the config that ships beside it in the repo.
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_LINK="$(readlink "$SCRIPT_PATH")"
+    case "$SCRIPT_LINK" in
+        /*) SCRIPT_PATH="$SCRIPT_LINK" ;;
+        *)  SCRIPT_PATH="$(dirname "$SCRIPT_PATH")/$SCRIPT_LINK" ;;
+    esac
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+CONFIG_FILE="${ACME_WORKTREE_CONFIG:-$SCRIPT_DIR/multi-instance.config.json}"
+
+# Populated by load_config() from the "paths" and "apps" blocks of $CONFIG_FILE.
+MAIN_REPO=""
+WORKTREE_DIR=""
+WORKTREE_PREFIX=""
+PRIMARY_NAME=""
+APP_BACKEND=""
+APP_FRONTEND=""
+APP_E2E=""
+APP_DOMAIN_API=""
+DOMAIN_API_DB_USER=""
+DOMAIN_API_DB_NAME=""
+
+# ── Dependencies ────────────────────────────────────────────────────────────
+
+require_jq() {
+    if ! command -v jq &> /dev/null; then
+        error "jq is required but not installed. Install with: brew install jq"
+    fi
+}
+
+# ── Colors (Catppuccin Macchiato) ────────────────────────────────────────────
+GREEN='\033[38;2;166;218;149m'
+RED='\033[38;2;237;135;150m'
+YELLOW='\033[38;2;238;212;159m'
+BLUE='\033[38;2;138;173;244m'
+MAUVE='\033[38;2;198;160;246m'
+TEAL='\033[38;2;139;213;202m'
+SUBTEXT='\033[38;2;165;173;203m'
+BOLD='\033[1m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+info()  { printf "${BLUE}${BOLD}▸${RESET} %s\n" "$1"; }
+ok()    { printf "${GREEN}${BOLD}✓${RESET} %s\n" "$1"; }
+warn()  { printf "${YELLOW}${BOLD}!${RESET} %s\n" "$1"; }
+error() { printf "${RED}${BOLD}✗${RESET} %s\n" "$1" >&2; exit 1; }
+
+# ── Cross-platform helpers ──────────────────────────────────────────────────
+
+sed_inplace() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "$@"
+    else
+        sed -i "$@"
+    fi
+}
+
+# Expand a leading "~" (config values are read as plain JSON strings, so the
+# shell never gets a chance to do it).
+expand_tilde() {
+    local p="$1"
+    local tilde='~'   # via a variable so the literal is never inside quotes
+    case "$p" in
+        "$tilde")    printf '%s\n' "$HOME" ;;
+        "$tilde"/*)  printf '%s\n' "$HOME/${p#"$tilde"/}" ;;
+        *)           printf '%s\n' "$p" ;;
+    esac
+}
+
+# Read repo paths and app directories out of the config. Nothing about the
+# machine this runs on is baked into the script.
+load_config() {
+    require_jq
+
+    if [ ! -f "$CONFIG_FILE" ]; then
+        error "Config not found: $CONFIG_FILE
+  Copy the example next to it and edit the paths/apps blocks:
+    cp \"$SCRIPT_DIR/multi-instance.config.example.json\" \"$CONFIG_FILE\"
+  Or point ACME_WORKTREE_CONFIG at your own copy."
+    fi
+
+    MAIN_REPO=$(expand_tilde "$(jq -r '.paths.mainRepo // ""' "$CONFIG_FILE")")
+    WORKTREE_DIR=$(expand_tilde "$(jq -r '.paths.worktreeRoot // ""' "$CONFIG_FILE")")
+    WORKTREE_PREFIX=$(jq -r '.paths.worktreePrefix // ""' "$CONFIG_FILE")
+
+    [ -n "$MAIN_REPO" ]       || error "Config is missing .paths.mainRepo ($CONFIG_FILE)"
+    [ -n "$WORKTREE_DIR" ]    || error "Config is missing .paths.worktreeRoot ($CONFIG_FILE)"
+    [ -n "$WORKTREE_PREFIX" ] || error "Config is missing .paths.worktreePrefix ($CONFIG_FILE)"
+    [ -d "$MAIN_REPO" ]       || error "Main repo not found: $MAIN_REPO (fix .paths.mainRepo in $CONFIG_FILE)"
+
+    # The primary instance is keyed in the registry by the main repo's directory name.
+    PRIMARY_NAME="$(basename "$MAIN_REPO")"
+
+    APP_BACKEND=$(jq -r '.apps.backend // "apps/backend"' "$CONFIG_FILE")
+    APP_FRONTEND=$(jq -r '.apps.frontend // "apps/frontend"' "$CONFIG_FILE")
+    APP_E2E=$(jq -r '.apps.e2e // "apps/frontend-e2e"' "$CONFIG_FILE")
+    APP_DOMAIN_API=$(jq -r '.apps.domainApi // "apps/domain-api"' "$CONFIG_FILE")
+
+    # Used only to compose a DATABASE_URL *template* when none exists yet. The password is
+    # never stored here — see configure_env_files, which refuses to overwrite an existing URL.
+    DOMAIN_API_DB_USER=$(jq -r '.defaults.domainApiDbUser // "app"' "$CONFIG_FILE")
+    DOMAIN_API_DB_NAME=$(jq -r '.defaults.domainApiDbName // "domain_development"' "$CONFIG_FILE")
+}
+
+# Set or update a variable in an env file
+set_env_var() {
+    local var_name="$1"
+    local var_value="$2"
+    local file="$3"
+
+    if grep -q "^${var_name}=" "$file" 2>/dev/null; then
+        sed_inplace "s|^${var_name}=.*|${var_name}=${var_value}|" "$file"
+    else
+        echo "${var_name}=${var_value}" >> "$file"
+    fi
+}
+
+# ── Instance Management ────────────────────────────────────────────────────
+
+# Find the lowest unused instance number >= 2
+next_available_instance() {
+    require_jq
+    local max_instances
+    max_instances=$(jq -r '.defaults.maxInstances // 10' "$CONFIG_FILE")
+
+    local used_instances
+    used_instances=$(jq -r '[.instances[].instance] | sort | .[]' "$CONFIG_FILE")
+
+    for ((i = 2; i <= max_instances; i++)); do
+        if ! echo "$used_instances" | grep -qx "$i"; then
+            echo "$i"
+            return 0
+        fi
+    done
+
+    error "No available instance numbers (max: $max_instances). Remove an instance first."
+}
+
+# Generate cloud alias from name: billing-rollup → dev-br
+auto_abbreviate() {
+    local name="$1"
+    local abbrev
+    # Take first letter of each hyphen-separated word
+    abbrev=$(echo "$name" | tr '-' '\n' | sed 's/^\(.\).*/\1/' | tr -d '\n')
+    echo "dev-${abbrev}"
+}
+
+# Validate cloud alias (storage account naming: 3-24 chars, lowercase alphanumeric)
+validate_azure_alias() {
+    local alias="$1"
+    # Storage account names are: <prefix><alias-without-hyphens><suffix>
+    # e.g., "developmentacmedev-br" → needs to fit in 24 chars with prefix
+    # The alias itself just needs to be reasonable
+    if [ ${#alias} -gt 20 ]; then
+        warn "Cloud alias '$alias' is long — storage account name may exceed 24 chars"
+        return 1
+    fi
+    return 0
+}
+
+# Convert name to DB-safe slug: billing-rollup → billing_rollup
+slugify() {
+    echo "$1" | tr '-' '_'
+}
+
+# Calculate ports for an instance number
+calculate_ports() {
+    local instance="$1"
+    require_jq
+
+    PORT_BACKEND=$(($(jq -r '.portAllocation.backend // 3000' "$CONFIG_FILE") + instance - 1))
+    PORT_FRONTEND=$(($(jq -r '.portAllocation.frontend // 4200' "$CONFIG_FILE") + instance - 1))
+    PORT_DOMAIN_API=$(($(jq -r '.portAllocation.domainApi // 3200' "$CONFIG_FILE") + instance - 1))
+    PORT_DOMAIN_API_DB=$(($(jq -r '.portAllocation.domainApiDb // 5444' "$CONFIG_FILE") + instance - 1))
+    PORT_DATABASE=$(($(jq -r '.portAllocation.database // 5433' "$CONFIG_FILE") + instance - 1))
+    PORT_AZURITE=$(($(jq -r '.portAllocation.azurite // 10000' "$CONFIG_FILE") + instance - 1))
+}
+
+# Register an instance in the config file
+register_instance() {
+    local name="$1"
+    local instance="$2"
+    local azure_alias="$3"
+    local description="${4:-Development instance}"
+    require_jq
+
+    # The primary instance has no cloud alias. Write a real JSON null for it rather than the
+    # four-character string "null" — otherwise the file disagrees with its own schema, and a
+    # reader cannot tell an absent alias from one that is literally named "null".
+    local alias_json
+    if [ -z "$azure_alias" ] || [ "$azure_alias" = "null" ]; then
+        alias_json="null"
+    else
+        alias_json=$(jq -n --arg a "$azure_alias" '$a')
+    fi
+
+    local tmp
+    tmp=$(mktemp)
+    jq --arg name "$name" \
+       --argjson instance "$instance" \
+       --argjson alias "$alias_json" \
+       --arg desc "$description" \
+       '.instances[$name] = {
+           "instance": $instance,
+           "azureAlias": $alias,
+           "description": $desc
+       }' "$CONFIG_FILE" > "$tmp" && mv "$tmp" "$CONFIG_FILE"
+
+    ok "Registered instance '$name' (#$instance, alias: $azure_alias)"
+}
+
+# Unregister an instance from the config file (frees the instance number)
+unregister_instance() {
+    local name="$1"
+    require_jq
+
+    if [ "$name" = "$PRIMARY_NAME" ]; then
+        error "Cannot unregister primary instance '$PRIMARY_NAME'"
+    fi
+
+    local tmp
+    tmp=$(mktemp)
+    jq --arg name "$name" 'del(.instances[$name])' "$CONFIG_FILE" > "$tmp" && mv "$tmp" "$CONFIG_FILE"
+
+    ok "Unregistered instance '$name' (instance number freed)"
+}
+
+# Look up instance info by name, returns 0 if found
+lookup_instance() {
+    local name="$1"
+    require_jq
+
+    local instance
+    instance=$(jq -r --arg name "$name" '.instances[$name].instance // empty' "$CONFIG_FILE" 2>/dev/null)
+
+    if [ -n "$instance" ] && [ "$instance" != "null" ]; then
+        INSTANCE_NUM="$instance"
+        INSTANCE_ALIAS=$(jq -r --arg name "$name" '.instances[$name].azureAlias // "none"' "$CONFIG_FILE")
+        INSTANCE_DESC=$(jq -r --arg name "$name" '.instances[$name].description // "Development instance"' "$CONFIG_FILE")
+        return 0
+    fi
+    return 1
+}
+
+# ── Environment Configuration ───────────────────────────────────────────────
+
+# Configure all env files for an instance
+configure_env_files() {
+    local target="$1"      # worktree path
+    local name="$2"        # worktree name (e.g., billing-rollup)
+    local instance="$3"    # instance number
+    local description="${4:-Development instance}"
+
+    calculate_ports "$instance"
+
+    # Determine DB and project names
+    local db_name project_name
+    if [ "$instance" -eq 1 ]; then
+        db_name=$(jq -r '.defaults.primaryDbName // "app_development"' "$CONFIG_FILE")
+        project_name=$(jq -r '.defaults.projectNamePrefix // "acme"' "$CONFIG_FILE")
+    else
+        local db_prefix project_prefix slug
+        db_prefix=$(jq -r '.defaults.dbNamePrefix // "app_dev_"' "$CONFIG_FILE")
+        project_prefix=$(jq -r '.defaults.projectNamePrefix // "acme"' "$CONFIG_FILE")
+        slug=$(slugify "$name")
+        db_name="${db_prefix}${slug}"
+        project_name="${project_prefix}-${name}"
+    fi
+
+    printf "${SUBTEXT}  Ports: backend=%d frontend=%d domain-api=%d db=%d domain-db=%d azurite=%d${RESET}\n" \
+        "$PORT_BACKEND" "$PORT_FRONTEND" "$PORT_DOMAIN_API" "$PORT_DATABASE" "$PORT_DOMAIN_API_DB" "$PORT_AZURITE"
+    printf "${SUBTEXT}  DB: %s  Docker: %s${RESET}\n" "$db_name" "$project_name"
+
+    # 1. Backend .env — copy from primary if missing, then update instance-specific vars
+    #    (every write below is conditional on the app existing in this repo)
+    local env_file="$target/$APP_BACKEND/.env"
+    if [ -d "$target/$APP_BACKEND" ] && [ ! -f "$env_file" ]; then
+        copy_secrets_from_primary "$target"
+    fi
+    if [ -f "$env_file" ]; then
+        set_env_var "PORT" "$PORT_BACKEND" "$env_file"
+        set_env_var "DB_PORT" "$PORT_DATABASE" "$env_file"
+        set_env_var "DB_NAME" "$db_name" "$env_file"
+        set_env_var "AZURITE_PORT" "$PORT_AZURITE" "$env_file"
+        set_env_var "DOMAIN_API_URL" "http://localhost:$PORT_DOMAIN_API" "$env_file"
+        set_env_var "DOMAIN_API_WEBHOOK_URL" "http://localhost:$PORT_DOMAIN_API" "$env_file"
+        ok "Updated $env_file"
+    elif [ -d "$target/$APP_BACKEND" ]; then
+        warn "No .env file found — run 'acme-worktree configure $name' after adding secrets"
+    fi
+
+    # 2. Root .env symlink
+    if [ -d "$target/$APP_BACKEND" ] && { [ ! -L "$target/.env" ] || [ "$(readlink "$target/.env")" != "$APP_BACKEND/.env" ]; }; then
+        ln -sf "$APP_BACKEND/.env" "$target/.env"
+        ok "Created root .env symlink"
+    fi
+
+    # 3. Frontend .env.local (Vite)
+    local frontend_env="$target/$APP_FRONTEND/.env.local"
+    if [ -d "$target/$APP_FRONTEND" ]; then
+        cat > "$frontend_env" << EOF || { warn "Failed to write $frontend_env"; return; }
+# Auto-generated by acme-worktree
+# Instance: $name - $description
+
+# Backend API URL
+VITE_LEGACY_HOST=http://localhost:$PORT_BACKEND
+
+# Dev server port (overrides vite.config.ts default of 4200)
+VITE_PORT=$PORT_FRONTEND
+EOF
+        ok "Created $frontend_env"
+    fi
+
+    # 4. Docker Compose override (project name isolation)
+    local compose_override="$target/$APP_BACKEND/docker-compose.override.yml"
+    if [ -d "$target/$APP_BACKEND" ]; then
+        cat > "$compose_override" << EOF || { warn "Failed to write $compose_override"; return; }
+# Auto-generated by acme-worktree
+# Instance: $name - $description
+# This file is gitignored
+
+name: $project_name
+EOF
+        ok "Created $compose_override"
+    fi
+
+    # 5. E2E environment (preserve credentials)
+    local e2e_env="$target/$APP_E2E/.env.e2e.local"
+    if [ -d "$target/$APP_E2E" ]; then
+        local e2e_email="" e2e_password="" e2e_totp=""
+        if [ -f "$e2e_env" ]; then
+            e2e_email=$(grep "^E2E_TEST_USER_EMAIL=" "$e2e_env" 2>/dev/null | cut -d'=' -f2- || echo "")
+            e2e_password=$(grep "^E2E_TEST_USER_PASSWORD=" "$e2e_env" 2>/dev/null | cut -d'=' -f2- || echo "")
+            e2e_totp=$(grep "^E2E_TEST_USER_TOTP_SECRET=" "$e2e_env" 2>/dev/null | cut -d'=' -f2- || echo "")
+        fi
+        [ -z "$e2e_email" ] && e2e_email="e2e-test@acme.example"
+
+        cat > "$e2e_env" << EOF || { warn "Failed to write $e2e_env"; return; }
+# E2E Test Configuration - Local Development
+# Auto-generated by acme-worktree
+# Instance: $name - $description
+
+E2E_BASE_URL=http://localhost:$PORT_FRONTEND
+E2E_BACKEND_URL=http://localhost:$PORT_BACKEND
+E2E_TEST_USER_EMAIL=$e2e_email
+E2E_TEST_USER_PASSWORD=$e2e_password
+E2E_TEST_USER_TOTP_SECRET=$e2e_totp
+EOF
+        ok "Created $e2e_env"
+    fi
+
+    # 6. Domain API .env
+    local domain_api_env="$target/$APP_DOMAIN_API/.env"
+    if [ -d "$target/$APP_DOMAIN_API" ] && [ ! -f "$domain_api_env" ]; then
+        local primary_domain_api_env="$MAIN_REPO/$APP_DOMAIN_API/.env"
+        if [ -f "$primary_domain_api_env" ]; then
+            cp "$primary_domain_api_env" "$domain_api_env"
+            ok "Copied domain-api .env from primary instance"
+        fi
+    fi
+    if [ -f "$domain_api_env" ]; then
+        set_env_var "PORT" "$PORT_DOMAIN_API" "$domain_api_env"
+        # DATABASE_URL carries a credential, and this command's job is port allocation — not
+        # credential management. So: if a URL is already present, rewrite ONLY its host:port and
+        # leave user, password and database name exactly as the developer set them. Blindly
+        # re-stamping a whole URL here would overwrite a working local credential on every
+        # `configure`, which is a data-loss bug wearing the costume of idempotency.
+        if grep -q '^DATABASE_URL=' "$domain_api_env" 2>/dev/null; then
+            sed_inplace -E "s|^(DATABASE_URL=[a-z]+://[^@]*@)[^:/]+:[0-9]+|\1localhost:${PORT_DOMAIN_API_DB}|" "$domain_api_env"
+        else
+            set_env_var "DATABASE_URL" \
+                "postgresql://${DOMAIN_API_DB_USER}:<DB_PASSWORD>@localhost:${PORT_DOMAIN_API_DB}/${DOMAIN_API_DB_NAME}" \
+                "$domain_api_env"
+            warn "Wrote a DATABASE_URL template — replace <DB_PASSWORD> before starting the service"
+        fi
+        set_env_var "LEGACY_BACKEND_URL" "http://localhost:$PORT_BACKEND" "$domain_api_env"
+        ok "Updated $domain_api_env"
+    elif [ -d "$target/$APP_DOMAIN_API" ]; then
+        warn "No domain-api .env found. Copy template and add secrets:"
+        warn "  cp $APP_DOMAIN_API/.env.template $domain_api_env"
+        warn "  Then re-run: acme-worktree configure $name"
+    fi
+
+    # 7. Docker Compose .env (auto-generated — manual additions will be overwritten)
+    local compose_env="$target/scripts/local-multi-instance/.env"
+    if [ -d "$target/scripts/local-multi-instance" ]; then
+        cat > "$compose_env" << EOF
+# Auto-generated by acme-worktree — DO NOT EDIT (re-run: acme-worktree configure)
+# Instance: $name (#$instance)
+COMPOSE_PROJECT_NAME=$project_name
+BACKEND_PORT=$PORT_BACKEND
+FRONTEND_PORT=$PORT_FRONTEND
+DB_PORT=$PORT_DATABASE
+AZURITE_PORT=$PORT_AZURITE
+DOMAIN_API_DB_PORT=$PORT_DOMAIN_API_DB
+DOMAIN_API_PORT=$PORT_DOMAIN_API
+EOF
+        ok "Created $compose_env"
+    fi
+}
+
+# Copy the primary instance's .env as a starting point for a new worktree
+# This gives new instances all the secrets without manual lookups in your secret manager
+copy_secrets_from_primary() {
+    local target="$1"
+    local primary_env="$MAIN_REPO/$APP_BACKEND/.env"
+    local target_env="$target/$APP_BACKEND/.env"
+
+    if [ -f "$primary_env" ]; then
+        cp "$primary_env" "$target_env"
+        ok "Copied secrets from primary instance .env"
+    else
+        # Fall back to template if primary .env doesn't exist
+        local template="$target/$APP_BACKEND/.env.template"
+        if [ -f "$template" ]; then
+            cp "$template" "$target_env"
+            warn "Copied .env.template (fill in secrets from your secret manager)"
+        fi
+    fi
+}
+
+# ── Commands ─────────────────────────────────────────────────────────────────
+
+cmd_create() {
+    local name="${1:?Usage: acme-worktree create <name> [branch]}"
+    local branch="${2:-}"
+    local target="${WORKTREE_DIR}/${WORKTREE_PREFIX}${name}"
+
+    require_jq
+
+    [ -d "$target" ] && error "Directory already exists: $target"
+
+    # Check name not already registered
+    if lookup_instance "$name" 2>/dev/null; then
+        error "Instance '$name' already registered (instance #$INSTANCE_NUM)"
+    fi
+
+    # Auto-assign instance number
+    local instance
+    instance=$(next_available_instance)
+
+    # Auto-generate cloud alias
+    local azure_alias
+    azure_alias=$(auto_abbreviate "$name")
+    validate_azure_alias "$azure_alias" || true
+
+    info "Creating worktree '${WORKTREE_PREFIX}${name}' (instance #${instance}, alias: ${azure_alias})..."
+
+    # ── Git worktree ────────────────────────────────────────────────────────
+    if [ -n "$branch" ]; then
+        # Explicit branch passed — attach worktree to existing branch (PR review etc.)
+        info "Creating worktree on existing branch '${branch}'..."
+        git -C "$MAIN_REPO" worktree add "$target" "$branch"
+    else
+        # Interactive prompt for branch type, with non-TTY fallback
+        local new_branch_name
+        if [ -t 0 ]; then
+            printf "\n${MAUVE}${BOLD}Branch type for '${name}':${RESET}\n"
+            printf "  ${TEAL}1)${RESET} feat   ${SUBTEXT}new feature${RESET}\n"
+            printf "  ${TEAL}2)${RESET} fix    ${SUBTEXT}bug fix${RESET}\n"
+            printf "  ${TEAL}3)${RESET} chore  ${SUBTEXT}maintenance, refactor, deps${RESET}\n"
+            printf "  ${TEAL}4)${RESET} none   ${SUBTEXT}sandbox, no prefix${RESET}\n"
+            printf "  ${TEAL}5)${RESET} other  ${SUBTEXT}type a custom branch name${RESET}\n"
+            local choice
+            read -p "Choose [1]: " choice
+            choice="${choice:-1}"
+
+            case "$choice" in
+                1|feat)  new_branch_name="feat/${name}" ;;
+                2|fix)   new_branch_name="fix/${name}" ;;
+                3|chore) new_branch_name="chore/${name}" ;;
+                4|none)  new_branch_name="${name}" ;;
+                5|other)
+                    read -p "Custom branch name: " new_branch_name
+                    [ -z "$new_branch_name" ] && error "Branch name required"
+                    ;;
+                *) error "Invalid choice '${choice}' (expected 1-5 or feat/fix/chore/none/other)" ;;
+            esac
+        else
+            # Non-interactive (piped/scripted) — fall back to no-prefix
+            new_branch_name="${name}"
+        fi
+
+        info "Fetching origin/main and branching '${new_branch_name}' from it..."
+        git -C "$MAIN_REPO" fetch origin main --quiet
+        git -C "$MAIN_REPO" worktree add "$target" -b "${new_branch_name}" origin/main
+    fi
+
+    # ── Symlink .claude/ ────────────────────────────────────────────────────
+    if [ -d "$target/.claude" ] && [ ! -L "$target/.claude" ]; then
+        /bin/rm -rf "$target/.claude"
+    fi
+    ln -s "$MAIN_REPO/.claude" "$target/.claude"
+
+    # Tell git to ignore the symlink change
+    git -C "$target" ls-files .claude/ 2>/dev/null | while read -r f; do
+        git -C "$target" update-index --skip-worktree "$f" 2>/dev/null || true
+    done
+
+    # Add .claude to local git excludes
+    local exclude_file="$target/.git/info/exclude"
+    if [ -f "$target/.git" ]; then
+        local gitdir
+        gitdir=$(grep 'gitdir:' "$target/.git" | sed 's/gitdir: //')
+        exclude_file="${gitdir}/info/exclude"
+        mkdir -p "$(dirname "$exclude_file")"
+    fi
+    if ! grep -q '^\.claude$' "$exclude_file" 2>/dev/null; then
+        echo ".claude" >> "$exclude_file"
+    fi
+    ok "Symlinked .claude → ${PRIMARY_NAME}/.claude (hidden from git status)"
+
+    # ── Register instance ───────────────────────────────────────────────────
+    local description="Worktree for $(git -C "$target" branch --show-current)"
+    register_instance "$name" "$instance" "$azure_alias" "$description"
+
+    # ── Configure env files ─────────────────────────────────────────────────
+    info "Configuring environment files..."
+    configure_env_files "$target" "$name" "$instance" "$description"
+
+    # ── Summary ─────────────────────────────────────────────────────────────
+    printf "\n"
+    ok "Worktree ready at: $target"
+    printf "${SUBTEXT}  Branch:      $(git -C "$target" branch --show-current)${RESET}\n"
+    printf "${SUBTEXT}  Instance:    #${instance}${RESET}\n"
+    printf "${SUBTEXT}  Cloud alias: ${azure_alias}${RESET}\n"
+    printf "${SUBTEXT}  Shared:      .claude → ${PRIMARY_NAME}/.claude${RESET}\n"
+    printf "\n"
+    printf "${MAUVE}  Next steps:${RESET}\n"
+    printf "    ${TEAL}acme-worktree open ${name}${RESET}   # open in tmux + claude\n"
+    printf "    ${TEAL}cd ${target}${RESET}\n"
+    # Only advertise the aggregate compose stack if this repo actually ships one — the
+    # generated .env below is useful either way, but printing a command for a file that
+    # does not exist is worse than printing nothing.
+    if [ -f "$target/scripts/local-multi-instance/docker-compose.yml" ]; then
+        printf "\n"
+        printf "${MAUVE}  Docker Compose (all services):${RESET}\n"
+        printf "    ${TEAL}# Stop backend containers first (if running):${RESET}\n"
+        printf "    ${TEAL}cd ${target}/${APP_BACKEND} && docker compose down && cd ${target}${RESET}\n"
+        printf "    ${TEAL}docker compose -f scripts/local-multi-instance/docker-compose.yml up${RESET}\n"
+    fi
+}
+
+cmd_remove() {
+    local name="${1:?Usage: acme-worktree remove <name>}"
+    local target="${WORKTREE_DIR}/${WORKTREE_PREFIX}${name}"
+
+    require_jq
+
+    [ ! -d "$target" ] && error "Worktree not found: $target"
+    [ "$name" = "$PRIMARY_NAME" ] && error "Cannot remove primary instance '$PRIMARY_NAME'"
+
+    # Check for uncommitted changes — categorize as safe (cache/build) vs valuable (code/docs)
+    local all_changes
+    all_changes=$(git -C "$target" status --porcelain 2>/dev/null | grep -v '^ D .claude/' | grep -v '^?? .claude$' || true)
+    if [ -n "$all_changes" ]; then
+        local safe_lines="" valuable_lines=""
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            local cpath="${line:3}"
+            case "$cpath" in
+                .remember/*|.remember|.remember/) safe_lines+="$line"$'\n' ;;
+                node_modules/*|node_modules|node_modules/) safe_lines+="$line"$'\n' ;;
+                dist/*|dist|dist/|coverage/*|coverage|coverage/) safe_lines+="$line"$'\n' ;;
+                .next/*|.next|.next/|out/*|out|out/) safe_lines+="$line"$'\n' ;;
+                *.tsbuildinfo|*.log) safe_lines+="$line"$'\n' ;;
+                *) valuable_lines+="$line"$'\n' ;;
+            esac
+        done <<< "$all_changes"
+
+        if [ -n "$valuable_lines" ]; then
+            warn "Worktree has uncommitted changes that look valuable (code, docs, configs):"
+            printf "${YELLOW}%s${RESET}" "$valuable_lines"
+            if [ -n "$safe_lines" ]; then
+                printf "${SUBTEXT}Plus safe-to-discard cache/build artifacts:${RESET}\n"
+                printf "${SUBTEXT}%s${RESET}" "$safe_lines"
+            fi
+            printf "\n"
+            read -p "Type 'yes' to confirm removal of valuable changes: " confirm
+            [ "$confirm" = "yes" ] || { info "Aborted."; exit 0; }
+        elif [ -n "$safe_lines" ]; then
+            info "Discarding cache/build artifacts only (safe):"
+            printf "${SUBTEXT}%s${RESET}" "$safe_lines"
+        fi
+    fi
+
+    # Kill any tmux sessions using this worktree
+    local session_name="${WORKTREE_PREFIX}${name}"
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        warn "Killing tmux session: $session_name"
+        tmux kill-session -t "$session_name"
+    fi
+
+    # Remove symlink first (so git worktree remove doesn't complain)
+    [ -L "$target/.claude" ] && /bin/rm "$target/.claude"
+
+    # Undo skip-worktree flags before removing
+    # Use awk (not grep|awk) to avoid grep returning 1 on no-match killing the pipefail-enabled pipeline
+    git -C "$target" ls-files -v .claude/ 2>/dev/null | awk '/^S/ {print $2}' | while read -r f; do
+        git -C "$target" update-index --no-skip-worktree "$f" 2>/dev/null || true
+    done
+
+    # Unregister from config (frees instance number)
+    if lookup_instance "$name" 2>/dev/null; then
+        unregister_instance "$name"
+    fi
+
+    info "Removing worktree '${WORKTREE_PREFIX}${name}'..."
+    git -C "$MAIN_REPO" worktree remove "$target" --force
+
+    # Clean up the branch if it was auto-created (same name as worktree)
+    if git -C "$MAIN_REPO" branch --list "$name" | grep -q "$name"; then
+        read -p "Also delete branch '$name'? (y/N) " del_branch
+        if [[ "$del_branch" =~ ^[Yy]$ ]]; then
+            git -C "$MAIN_REPO" branch -D "$name"
+            ok "Branch '$name' deleted"
+        fi
+    fi
+
+    # Auto-prune orphaned Claude project dir. Claude names it after the worktree's
+    # absolute path with "/" replaced by "-", so derive it — never hardcode a home dir.
+    local claude_proj_dir
+    claude_proj_dir="${HOME}/.claude/projects/$(printf '%s' "$target" | tr '/' '-')"
+    if [ -d "$claude_proj_dir" ]; then
+        local proj_size
+        proj_size=$(du -sh "$claude_proj_dir" 2>/dev/null | awk '{print $1}')
+        /bin/rm -rf "$claude_proj_dir"
+        ok "Pruned orphaned Claude project dir (${proj_size:-?})"
+    fi
+
+    ok "Worktree removed: ${WORKTREE_PREFIX}${name}"
+}
+
+cmd_list() {
+    require_jq
+
+    printf "${BOLD}${MAUVE}Acme Worktrees${RESET}\n"
+    printf "${SUBTEXT}%-27s %-25s %-4s %-20s %-10s %s${RESET}\n" \
+        "  Directory" "Branch" "#" "Ports" "Alias" "Config"
+    printf "${SUBTEXT}────────────────────────────────────────────────────────────────────────────────────────────${RESET}\n"
+
+    git -C "$MAIN_REPO" worktree list --porcelain | while IFS= read -r line; do
+        case "$line" in
+            worktree\ *)
+                local path="${line#worktree }"
+                local dirname
+                dirname="$(basename "$path")"
+                ;;
+            branch\ *)
+                local branch="${line#branch refs/heads/}"
+                local symlink_status=""
+                if [ -L "$path/.claude" ]; then
+                    symlink_status="${GREEN}⊘ shared${RESET}"
+                elif [ -d "$path/.claude" ]; then
+                    symlink_status="${YELLOW}◉ local${RESET}"
+                else
+                    symlink_status="${RED}✗ missing${RESET}"
+                fi
+
+                # Look up instance info from config
+                local config_name=""
+                local instance_num="" ports="" alias_str=""
+
+                # Determine config key: the main repo's own name for the primary,
+                # otherwise the directory name with the configured prefix stripped
+                if [ "$dirname" = "$PRIMARY_NAME" ]; then
+                    config_name="$PRIMARY_NAME"
+                elif [ "${dirname#"$WORKTREE_PREFIX"}" != "$dirname" ]; then
+                    config_name="${dirname#"$WORKTREE_PREFIX"}"
+                fi
+
+                if [ -n "$config_name" ]; then
+                    instance_num=$(jq -r --arg n "$config_name" '.instances[$n].instance // empty' "$CONFIG_FILE" 2>/dev/null)
+                    if [ -n "$instance_num" ]; then
+                        calculate_ports "$instance_num"
+                        ports=":${PORT_BACKEND}/:${PORT_FRONTEND}/:${PORT_DOMAIN_API}"
+                        alias_str=$(jq -r --arg n "$config_name" '.instances[$n].azureAlias // ""' "$CONFIG_FILE" 2>/dev/null)
+                        [ "$alias_str" = "null" ] && alias_str=""
+                    fi
+                fi
+
+                # Truncate long names for display
+                local display_dir="$dirname"
+                [ ${#display_dir} -gt 25 ] && display_dir="${display_dir:0:22}..."
+                local display_branch="$branch"
+                [ ${#display_branch} -gt 23 ] && display_branch="${display_branch:0:20}..."
+
+                printf "  ${TEAL}%-25s${RESET} ${MAUVE}%-23s${RESET}" "$display_dir" "$display_branch"
+
+                if [ -n "$instance_num" ]; then
+                    printf " ${BOLD}#%-2s${RESET} ${SUBTEXT}%-19s${RESET} ${BLUE}%-9s${RESET}" \
+                        "$instance_num" "$ports" "$alias_str"
+                else
+                    # ADDITION (not in the original): say "unmanaged" instead of leaving
+                    # the row blank. No registry entry means no allocated ports, so the
+                    # allocator can hand this worktree's slot to the next `create`.
+                    printf " ${DIM}%-4s${RESET} ${YELLOW}%-19s${RESET} ${DIM}%-9s${RESET}" \
+                        "--" "unmanaged" ""
+                fi
+
+                printf " %b\n" "$symlink_status"
+                ;;
+        esac
+    done
+    printf "${SUBTEXT}────────────────────────────────────────────────────────────────────────────────────────────${RESET}\n"
+
+    # ADDITION (not in the original): worktree directories the loop above cannot
+    # show at all — a prefixed directory on disk that git does not list as a
+    # worktree of the main repo, or lists but that has no registry entry.
+    # Skipping these silently is how two checkouts end up on the same ports.
+    local known_paths
+    known_paths=$(git -C "$MAIN_REPO" worktree list --porcelain | awk '/^worktree /{print substr($0, 10)}')
+    local unmanaged_header=0 dir dname wt_name in_git registered reason
+    for dir in "${WORKTREE_DIR}/${WORKTREE_PREFIX}"*; do
+        [ -d "$dir" ] || continue
+        [ "$dir" = "$MAIN_REPO" ] && continue
+        dname="$(basename "$dir")"
+        wt_name="${dname#"$WORKTREE_PREFIX"}"
+        [ -z "$wt_name" ] && continue
+
+        in_git=0
+        # herestring, not a pipe: `grep -q` exits on first match, which would SIGPIPE the
+        # writer and make `pipefail` report 141 for a successful lookup.
+        if grep -qxF "$dir" <<< "$known_paths"; then
+            in_git=1
+        fi
+        registered=0
+        if [ -n "$(jq -r --arg n "$wt_name" '.instances[$n].instance // empty' "$CONFIG_FILE" 2>/dev/null)" ]; then
+            registered=1
+        fi
+        [ "$in_git" -eq 1 ] && [ "$registered" -eq 1 ] && continue
+
+        if [ "$unmanaged_header" -eq 0 ]; then
+            printf "${YELLOW}${BOLD}!${RESET} Unmanaged worktrees (no instance allocated — ports may collide):\n"
+            unmanaged_header=1
+        fi
+        if [ "$in_git" -eq 0 ]; then
+            reason="not a git worktree of $PRIMARY_NAME"
+        else
+            reason="no registry entry — run: acme-worktree doctor --adopt"
+        fi
+        printf "  ${YELLOW}%-25s${RESET} ${DIM}%s${RESET}\n" "$dname" "$reason"
+    done
+}
+
+# Detect and clean config drift in BOTH directions:
+#   1. registered instances whose worktree dir is gone (original behaviour), and
+#   2. worktree dirs on disk with no registry entry (addition — see below).
+# These accumulate when a worktree is deleted directly (git worktree remove / rm)
+# instead of via `acme-worktree remove`, leaving the instance number reserved
+# forever — eventually exhausting all slots ("No available instance numbers").
+cmd_doctor() {
+    require_jq
+
+    local dry_run=0 adopt=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dry-run|-n) dry_run=1 ;;
+            --adopt)      adopt=1 ;;
+            *)            error "Unknown option: $1 (usage: acme-worktree doctor [--dry-run] [--adopt])" ;;
+        esac
+        shift
+    done
+
+    printf "${BOLD}${MAUVE}acme-worktree doctor${RESET} — checking for config drift\n"
+    [ "$dry_run" -eq 1 ] && warn "Dry run — reporting only, nothing will be changed"
+
+    # 1. Prune git's stale worktree admin records (safe + idempotent)
+    if [ "$dry_run" -eq 1 ]; then
+        local prunable
+        prunable=$(git -C "$MAIN_REPO" worktree prune --dry-run --verbose 2>/dev/null || true)
+        [ -n "$prunable" ] && { info "git worktree prune would remove:"; printf "${SUBTEXT}%s${RESET}\n" "$prunable"; }
+    else
+        git -C "$MAIN_REPO" worktree prune 2>/dev/null || true
+    fi
+
+    doctor_sweep_orphans "$dry_run"
+    doctor_sweep_unmanaged "$dry_run" "$adopt"
+
+    # Non-blocking by design: a session-start hook calls this and must never be
+    # the reason a session fails to start.
+    return 0
+}
+
+# Direction 1 (original behaviour, unchanged): a registered name with no worktree
+# dir on disk. Its instance number is reserved for nothing.
+doctor_sweep_orphans() {
+    local dry_run="$1"
+
+    # (Newline-delimited string instead of an array for macOS bash 3.2 safety.)
+    local orphans="" count=0 name inst
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+        [ "$name" = "$PRIMARY_NAME" ] && continue   # never touch the primary instance
+        if [ ! -d "${WORKTREE_DIR}/${WORKTREE_PREFIX}${name}" ]; then
+            orphans+="${name}"$'\n'
+            count=$((count + 1))
+        fi
+    done < <(jq -r '.instances | keys[]' "$CONFIG_FILE")
+
+    if [ "$count" -eq 0 ]; then
+        ok "No orphaned instances — every registered instance has a worktree."
+        return 0
+    fi
+
+    warn "Found ${count} orphaned instance(s) (registered, but no worktree on disk):"
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+        inst=$(jq -r --arg n "$name" '.instances[$n].instance // "?"' "$CONFIG_FILE")
+        printf "  ${DIM}#%-2s${RESET} ${TEAL}%s${RESET}\n" "$inst" "$name"
+    done <<< "$orphans"
+
+    if [ "$dry_run" -eq 1 ]; then
+        info "Run 'acme-worktree doctor' (without --dry-run) to free these instance numbers."
+        return 0
+    fi
+
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+        unregister_instance "$name"
+    done <<< "$orphans"
+
+    ok "Freed ${count} instance(s); $(jq '.instances | length' "$CONFIG_FILE") still registered."
+}
+
+# Direction 2 — ADDITION (not in the original script): a worktree dir on disk with
+# no registry entry. The original doctor only ever swept the other way, so these
+# stayed invisible. That is not cosmetic: an unregistered worktree holds ports that
+# were never allocated, so next_available_instance will happily hand the same slot
+# to the next `create` — producing exactly the port/database/compose-name collision
+# this tool exists to prevent.
+doctor_sweep_unmanaged() {
+    local dry_run="$1" adopt="$2"
+
+    local unmanaged="" count=0 dir dname wt_name
+    for dir in "${WORKTREE_DIR}/${WORKTREE_PREFIX}"*; do
+        [ -d "$dir" ] || continue                   # no matches → glob stays literal
+        [ "$dir" = "$MAIN_REPO" ] && continue
+        [ -e "$dir/.git" ] || continue              # only real checkouts, not stray dirs
+        dname="$(basename "$dir")"
+        wt_name="${dname#"$WORKTREE_PREFIX"}"
+        [ -z "$wt_name" ] && continue
+        if [ -z "$(jq -r --arg n "$wt_name" '.instances[$n].instance // empty' "$CONFIG_FILE" 2>/dev/null)" ]; then
+            unmanaged+="${wt_name}"$'\n'
+            count=$((count + 1))
+        fi
+    done
+
+    if [ "$count" -eq 0 ]; then
+        ok "No unmanaged worktrees — every worktree on disk is registered."
+        return 0
+    fi
+
+    warn "Found ${count} unmanaged worktree(s) (on disk, but not in the registry):"
+    while IFS= read -r wt_name; do
+        [ -z "$wt_name" ] && continue
+        printf "  ${DIM}#--${RESET} ${TEAL}%s${RESET}\n" "${WORKTREE_PREFIX}${wt_name}"
+    done <<< "$unmanaged"
+    printf "${SUBTEXT}  Their ports were never allocated, so 'create' can assign the same instance${RESET}\n"
+    printf "${SUBTEXT}  number to a new worktree — two checkouts then bind the same backend,${RESET}\n"
+    printf "${SUBTEXT}  frontend and database ports and share one Docker Compose project name.${RESET}\n"
+
+    if [ "$adopt" -eq 0 ]; then
+        info "Run 'acme-worktree doctor --adopt' to register them at the next free instance numbers."
+        return 0
+    fi
+
+    if [ "$dry_run" -eq 1 ]; then
+        info "Dry run — would register ${count} worktree(s); nothing was changed."
+        return 0
+    fi
+
+    # --adopt: give each unmanaged worktree the next free slot. Anything already
+    # registered keeps its number and its config untouched.
+    local instance azure_alias adopted=0
+    while IFS= read -r wt_name; do
+        [ -z "$wt_name" ] && continue
+        # next_available_instance exits on exhaustion. Adopting is a bulk operation, so
+        # check the ceiling first and stop with a partial-progress report rather than
+        # dying halfway through with nothing said about what was already written.
+        if ! instance=$(next_available_instance 2>/dev/null); then
+            warn "Ran out of instance slots after adopting ${adopted} of ${count}."
+            warn "Free some with 'acme-worktree remove <name>', or raise defaults.maxInstances."
+            break
+        fi
+        azure_alias=$(auto_abbreviate "$wt_name")
+        register_instance "$wt_name" "$instance" "$azure_alias" "Adopted by doctor --adopt"
+        adopted=$((adopted + 1))
+    done <<< "$unmanaged"
+
+    ok "Adopted ${adopted} worktree(s); $(jq '.instances | length' "$CONFIG_FILE") now registered."
+    info "Run 'acme-worktree configure <name>' for each one to generate its env files."
+}
+
+cmd_configure() {
+    require_jq
+
+    local name="${1:-}"
+    local target
+
+    if [ -n "$name" ]; then
+        target="${WORKTREE_DIR}/${WORKTREE_PREFIX}${name}"
+        [ ! -d "$target" ] && error "Worktree not found: $target"
+    else
+        # Configure current directory
+        target="$(pwd)"
+        local dirname
+        dirname=$(basename "$target")
+        if [ "$dirname" = "$PRIMARY_NAME" ]; then
+            name="$PRIMARY_NAME"
+        elif [ "${dirname#"$WORKTREE_PREFIX"}" != "$dirname" ]; then
+            name="${dirname#"$WORKTREE_PREFIX"}"
+        else
+            error "Not in a worktree directory (expected '$PRIMARY_NAME' or '${WORKTREE_PREFIX}<name>'): $dirname"
+        fi
+    fi
+
+    if ! lookup_instance "$name"; then
+        # Auto-register if not in config (supports legacy worktrees)
+        warn "Instance '$name' not in config — registering now..."
+        local instance
+        if [ "$name" = "$PRIMARY_NAME" ]; then
+            instance=1
+        else
+            instance=$(next_available_instance)
+        fi
+        local azure_alias
+        if [ "$name" = "$PRIMARY_NAME" ]; then
+            azure_alias="null"
+        else
+            azure_alias=$(auto_abbreviate "$name")
+        fi
+        register_instance "$name" "$instance" "$azure_alias" "Development instance"
+        lookup_instance "$name"
+    fi
+
+    info "Configuring instance '$name' (instance #${INSTANCE_NUM})..."
+    configure_env_files "$target" "$name" "$INSTANCE_NUM" "$INSTANCE_DESC"
+
+    printf "\n"
+    ok "Configuration complete!"
+    printf "\n"
+    printf "${MAUVE}  Access URLs:${RESET}\n"
+    calculate_ports "$INSTANCE_NUM"
+    printf "    ${TEAL}Backend:     http://localhost:${PORT_BACKEND}${RESET}\n"
+    printf "    ${TEAL}Frontend:    http://localhost:${PORT_FRONTEND}${RESET}\n"
+    printf "    ${TEAL}Domain API:  http://localhost:${PORT_DOMAIN_API}/health${RESET}\n"
+}
+
+cmd_status() {
+    require_jq
+
+    local name="${1:-}"
+    local target
+
+    if [ -n "$name" ]; then
+        # Handle both the primary instance and worktree names
+        if [ "$name" = "$PRIMARY_NAME" ]; then
+            target="$MAIN_REPO"
+        else
+            target="${WORKTREE_DIR}/${WORKTREE_PREFIX}${name}"
+        fi
+    else
+        target="$(pwd)"
+        local dirname
+        dirname=$(basename "$target")
+        if [ "$dirname" = "$PRIMARY_NAME" ]; then
+            name="$PRIMARY_NAME"
+        elif [ "${dirname#"$WORKTREE_PREFIX"}" != "$dirname" ]; then
+            name="${dirname#"$WORKTREE_PREFIX"}"
+        else
+            error "Not in a worktree directory (expected '$PRIMARY_NAME' or '${WORKTREE_PREFIX}<name>'): $dirname"
+        fi
+    fi
+
+    if ! lookup_instance "$name"; then
+        error "Instance '$name' not found in config. Run 'acme-worktree configure $name' first."
+    fi
+
+    calculate_ports "$INSTANCE_NUM"
+
+    local db_name project_name
+    if [ "$INSTANCE_NUM" -eq 1 ]; then
+        db_name=$(jq -r '.defaults.primaryDbName // "app_development"' "$CONFIG_FILE")
+        project_name=$(jq -r '.defaults.projectNamePrefix // "acme"' "$CONFIG_FILE")
+    else
+        local db_prefix project_prefix slug
+        db_prefix=$(jq -r '.defaults.dbNamePrefix // "app_dev_"' "$CONFIG_FILE")
+        project_prefix=$(jq -r '.defaults.projectNamePrefix // "acme"' "$CONFIG_FILE")
+        slug=$(slugify "$name")
+        db_name="${db_prefix}${slug}"
+        project_name="${project_prefix}-${name}"
+    fi
+
+    printf "\n"
+    printf "${BOLD}${MAUVE}Instance: ${name}${RESET}\n"
+    printf "${SUBTEXT}──────────────────────────────────────${RESET}\n"
+    printf "  ${BOLD}Instance #:${RESET}    %s\n" "$INSTANCE_NUM"
+    printf "  ${BOLD}Description:${RESET}   %s\n" "$INSTANCE_DESC"
+    printf "  ${BOLD}Cloud alias:${RESET}   %s\n" "$INSTANCE_ALIAS"
+
+    if [ -d "$target" ]; then
+        printf "  ${BOLD}Directory:${RESET}     %s\n" "$target"
+        printf "  ${BOLD}Branch:${RESET}        %s\n" "$(git -C "$target" branch --show-current 2>/dev/null || echo 'N/A')"
+    fi
+
+    printf "\n"
+    printf "  ${BOLD}Ports:${RESET}\n"
+    printf "    Backend:    %d\n" "$PORT_BACKEND"
+    printf "    Frontend:   %d\n" "$PORT_FRONTEND"
+    printf "    Domain API: %d\n" "$PORT_DOMAIN_API"
+    printf "    Database:   %d\n" "$PORT_DATABASE"
+    printf "    Domain DB:  %d\n" "$PORT_DOMAIN_API_DB"
+    printf "    Azurite:    %d\n" "$PORT_AZURITE"
+
+    printf "\n"
+    printf "  ${BOLD}Database:${RESET}      %s\n" "$db_name"
+    printf "  ${BOLD}Docker:${RESET}        %s\n" "$project_name"
+
+    printf "\n"
+    printf "  ${BOLD}URLs:${RESET}\n"
+    printf "    Backend:     ${TEAL}http://localhost:${PORT_BACKEND}${RESET}\n"
+    printf "    Frontend:    ${TEAL}http://localhost:${PORT_FRONTEND}${RESET}\n"
+    printf "    Domain API:  ${TEAL}http://localhost:${PORT_DOMAIN_API}/health${RESET}\n"
+
+    # Check Docker status
+    if [ -d "$target" ] && command -v docker &> /dev/null; then
+        printf "\n"
+        printf "  ${BOLD}Docker status:${RESET}\n"
+        local containers
+        containers=$(docker ps --filter "label=com.docker.compose.project=$project_name" --format "    {{.Names}}: {{.Status}}" 2>/dev/null || echo "")
+        if [ -n "$containers" ]; then
+            printf "%s\n" "$containers"
+        else
+            printf "    ${DIM}No containers running${RESET}\n"
+        fi
+    fi
+
+    printf "${SUBTEXT}──────────────────────────────────────${RESET}\n"
+}
+
+cmd_open() {
+    local name="${1:-}"
+
+    # Interactive picker if no name passed (TTY required)
+    if [ -z "$name" ]; then
+        if [ ! -t 0 ]; then
+            error "Usage: acme-worktree open <name>"
+        fi
+
+        local i=0
+        declare -a wt_names
+
+        printf "\n${MAUVE}${BOLD}Available worktrees:${RESET}\n"
+
+        local wt_path="" wt_dir="" wt_branch=""
+        while IFS= read -r line; do
+            case "$line" in
+                worktree\ *)
+                    wt_path="${line#worktree }"
+                    wt_dir="$(basename "$wt_path")"
+                    ;;
+                branch\ *)
+                    wt_branch="${line#branch refs/heads/}"
+                    # Only list <prefix><name> worktrees (skip primary + agent worktrees)
+                    if [[ "$wt_path" != "${WORKTREE_DIR}/${WORKTREE_PREFIX}"* ]]; then
+                        continue
+                    fi
+                    i=$((i+1))
+                    wt_names[$i]="${wt_dir#"$WORKTREE_PREFIX"}"
+                    printf "  ${TEAL}%d)${RESET} %-30s ${MAUVE}%s${RESET}\n" "$i" "$wt_dir" "$wt_branch"
+                    ;;
+            esac
+        done < <(git -C "$MAIN_REPO" worktree list --porcelain)
+
+        [ "$i" -eq 0 ] && error "No ${WORKTREE_PREFIX}* worktrees found"
+
+        local choice
+        read -p "Open which? [1-$i]: " choice
+        [ -z "$choice" ] && error "No selection"
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "$i" ]; then
+            error "Invalid selection '$choice'"
+        fi
+        name="${wt_names[$choice]}"
+    fi
+
+    local target="${WORKTREE_DIR}/${WORKTREE_PREFIX}${name}"
+    local session_name="${WORKTREE_PREFIX}${name}"
+
+    [ ! -d "$target" ] && error "Worktree not found: $target (run 'acme-worktree create ${name}' first)"
+
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        # Session may be a continuum-restored zombie with stale cwd and no claude.
+        # Reconcile: if foreground is a plain shell, fix cwd and launch claude.
+        local cur_path cur_cmd
+        cur_path=$(tmux display-message -p -t "$session_name" '#{pane_current_path}' 2>/dev/null || echo "")
+        cur_cmd=$(tmux display-message -p -t "$session_name" '#{pane_current_command}' 2>/dev/null || echo "")
+
+        case "$cur_cmd" in
+            zsh|bash|fish|sh|-zsh|-bash)
+                info "Existing session has shell only — launching claude"
+                if [ "$cur_path" != "$target" ]; then
+                    warn "Session cwd '$cur_path' differs from worktree — fixing"
+                    tmux send-keys -t "$session_name" "cd $(printf '%q' "$target")" Enter
+                fi
+                tmux send-keys -t "$session_name" "claude --enable-auto-mode" Enter
+                ;;
+            *)
+                if [ "$cur_path" != "$target" ]; then
+                    warn "Session cwd '$cur_path' differs from worktree '$target'"
+                    warn "Foreground is '$cur_cmd' — not sending keys. Exit it, then re-run 'acme-worktree open $name'."
+                fi
+                info "Attaching to existing session: $session_name"
+                ;;
+        esac
+
+        tmux switch-client -t "$session_name" 2>/dev/null || tmux attach-session -t "$session_name"
+    else
+        info "Creating tmux session: $session_name"
+        if [ -n "${TMUX:-}" ]; then
+            # Already inside tmux — create detached then switch
+            # Launch a shell (not claude directly) so exiting claude doesn't kill the session
+            tmux new-session -d -s "$session_name" -c "$target"
+            tmux send-keys -t "$session_name" "claude --enable-auto-mode" Enter
+            tmux switch-client -t "$session_name"
+        else
+            # Not in tmux — create and attach in background, send claude command
+            tmux new-session -d -s "$session_name" -c "$target"
+            tmux send-keys -t "$session_name" "claude --enable-auto-mode" Enter
+            tmux attach-session -t "$session_name"
+        fi
+    fi
+}
+
+# ── Align with main ──────────────────────────────────────────────────────────
+
+cmd_align() {
+    local name="${1:-}"
+
+    # Interactive picker if no name
+    if [ -z "$name" ]; then
+        if [ ! -t 0 ]; then
+            error "Usage: acme-worktree align <name>"
+        fi
+        local i=0
+        declare -a wt_names
+        printf "\n${MAUVE}${BOLD}Worktree to align with origin/main:${RESET}\n"
+        local wt_path="" wt_dir="" wt_branch=""
+        while IFS= read -r line; do
+            case "$line" in
+                worktree\ *)
+                    wt_path="${line#worktree }"
+                    wt_dir="$(basename "$wt_path")"
+                    ;;
+                branch\ *)
+                    wt_branch="${line#branch refs/heads/}"
+                    if [[ "$wt_path" != "${WORKTREE_DIR}/${WORKTREE_PREFIX}"* ]]; then
+                        continue
+                    fi
+                    i=$((i+1))
+                    wt_names[$i]="${wt_dir#"$WORKTREE_PREFIX"}"
+                    printf "  ${TEAL}%d)${RESET} %-30s ${MAUVE}%s${RESET}\n" "$i" "$wt_dir" "$wt_branch"
+                    ;;
+            esac
+        done < <(git -C "$MAIN_REPO" worktree list --porcelain)
+        [ "$i" -eq 0 ] && error "No ${WORKTREE_PREFIX}* worktrees found"
+        local choice
+        read -p "Align which? [1-$i]: " choice
+        [ -z "$choice" ] && error "No selection"
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "$i" ]; then
+            error "Invalid selection '$choice'"
+        fi
+        name="${wt_names[$choice]}"
+    fi
+
+    local target="${WORKTREE_DIR}/${WORKTREE_PREFIX}${name}"
+    [ ! -d "$target" ] && error "Worktree not found: $target"
+
+    local branch
+    branch=$(git -C "$target" branch --show-current)
+    [ -z "$branch" ] && error "Worktree has detached HEAD — cannot align"
+
+    # Refuse on dirty (filtering claude/remember/cache symlink + cache artifacts)
+    local dirty
+    dirty=$(git -C "$target" status --porcelain 2>/dev/null \
+        | grep -v '^?? \.claude$' \
+        | grep -v '^ D \.claude/' \
+        | grep -v '^?? \.remember/' \
+        || true)
+    if [ -n "$dirty" ]; then
+        warn "Worktree has uncommitted tracked changes — refusing to align:"
+        echo "$dirty"
+        printf "\nCommit, stash, or discard first.\n"
+        return 1
+    fi
+
+    info "Fetching origin/main..."
+    git -C "$target" fetch origin main --quiet
+
+    local behind ahead
+    behind=$(git -C "$target" rev-list --count "HEAD..origin/main" 2>/dev/null || echo "?")
+    ahead=$(git -C "$target" rev-list --count "origin/main..HEAD" 2>/dev/null || echo "?")
+
+    if [ "$branch" = "main" ]; then
+        if [ "$behind" = "0" ]; then
+            ok "main is already up to date"
+        else
+            info "Fast-forwarding main by $behind commits..."
+            git -C "$target" merge --ff-only origin/main
+            ok "main now at $(git -C "$target" rev-parse --short HEAD)"
+        fi
+        return 0
+    fi
+
+    if [ "$behind" = "0" ]; then
+        ok "Already aligned — 0 commits behind, $ahead ahead"
+        return 0
+    fi
+
+    # Detect remote tracking
+    local has_remote default_choice default_label
+    if git -C "$target" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+        has_remote="yes"
+        default_choice="2"
+        default_label="merge (branch is pushed; merge avoids force-push)"
+    else
+        has_remote="no"
+        default_choice="1"
+        default_label="rebase (branch is local-only; keeps linear history)"
+    fi
+
+    printf "\n${MAUVE}${BOLD}Alignment summary for '${branch}':${RESET}\n"
+    printf "  Behind origin/main:  %s commits\n" "$behind"
+    printf "  Ahead of origin/main: %s commits\n" "$ahead"
+    printf "  Remote tracking:      %s\n" "$has_remote"
+    printf "  Default strategy:     ${SUBTEXT}%s${RESET}\n" "$default_label"
+    printf "\n"
+    printf "  ${TEAL}1)${RESET} rebase ${SUBTEXT}(linear, rewrites history — force-push needed if remote)${RESET}\n"
+    printf "  ${TEAL}2)${RESET} merge  ${SUBTEXT}(merge commit, preserves history — safe to push)${RESET}\n"
+    printf "  ${TEAL}3)${RESET} skip   ${SUBTEXT}(do nothing)${RESET}\n"
+
+    local choice
+    if [ -t 0 ]; then
+        read -p "Choose [${default_choice}]: " choice
+        choice="${choice:-$default_choice}"
+    else
+        choice="$default_choice"
+    fi
+
+    case "$choice" in
+        1|rebase)
+            info "Rebasing ${branch} onto origin/main..."
+            if git -C "$target" rebase origin/main; then
+                ok "Rebase complete"
+                if [ "$has_remote" = "yes" ] && [ "$ahead" != "0" ]; then
+                    warn "Branch is pushed — push with: git -C \"$target\" push --force-with-lease"
+                fi
+            else
+                warn "Rebase has conflicts — resolve in $target then run: git rebase --continue (or --abort)"
+                return 2
+            fi
+            ;;
+        2|merge)
+            info "Merging origin/main into ${branch}..."
+            if git -C "$target" merge origin/main --no-edit; then
+                ok "Merge complete"
+                if [ "$has_remote" = "yes" ]; then
+                    info "Push with: git -C \"$target\" push"
+                fi
+            else
+                warn "Merge has conflicts — resolve in $target then run: git commit (or --abort)"
+                return 2
+            fi
+            ;;
+        3|skip)
+            info "Skipped"
+            return 0
+            ;;
+        *) error "Invalid choice '$choice'" ;;
+    esac
+
+    local new_behind new_ahead
+    new_behind=$(git -C "$target" rev-list --count "HEAD..origin/main" 2>/dev/null || echo "?")
+    new_ahead=$(git -C "$target" rev-list --count "origin/main..HEAD" 2>/dev/null || echo "?")
+    printf "\n"
+    ok "Done — behind: $new_behind, ahead: $new_ahead"
+}
+
+# ── Help ─────────────────────────────────────────────────────────────────────
+
+cmd_help() {
+    printf "${BOLD}${MAUVE}acme-worktree${RESET} — Manage worktrees with shared config + env isolation\n"
+    printf "\n"
+    printf "${BOLD}Usage:${RESET}\n"
+    printf "  ${TEAL}acme-worktree create${RESET} <name> [existing-branch]\n"
+    printf "                                              Create worktree (interactive type prompt if no branch)\n"
+    printf "  ${TEAL}acme-worktree remove${RESET} <name>            Remove worktree + free instance\n"
+    printf "  ${TEAL}acme-worktree list${RESET}                     List worktrees with instance info\n"
+    printf "  ${TEAL}acme-worktree open${RESET}  [name]            Open in tmux + claude (interactive picker if no name)\n"
+    printf "  ${TEAL}acme-worktree configure${RESET} [name]         Re-generate env files\n"
+    printf "  ${TEAL}acme-worktree status${RESET} [name]            Show detailed instance info\n"
+    printf "  ${TEAL}acme-worktree align${RESET} [name]             Rebase or merge worktree's branch onto origin/main\n"
+    printf "  ${TEAL}acme-worktree doctor${RESET} [--dry-run] [--adopt]\n"
+    printf "                                              Reconcile registry and disk (both directions)\n"
+    printf "\n"
+    printf "${BOLD}Examples:${RESET}\n"
+    printf "  ${SUBTEXT}acme-worktree create billing-rollup               # interactive: prompts for feat/fix/chore/none${RESET}\n"
+    printf "  ${SUBTEXT}acme-worktree create review-pr feat/their-thing   # attach worktree to an existing branch${RESET}\n"
+    printf "  ${SUBTEXT}acme-worktree open                               # interactive picker over all worktrees${RESET}\n"
+    printf "  ${SUBTEXT}acme-worktree open billing-rollup${RESET}\n"
+    printf "  ${SUBTEXT}acme-worktree configure                # re-configure current dir${RESET}\n"
+    printf "  ${SUBTEXT}acme-worktree status billing-rollup${RESET}\n"
+    printf "  ${SUBTEXT}acme-worktree remove billing-rollup${RESET}\n"
+    printf "  ${SUBTEXT}acme-worktree doctor --dry-run                    # preview both drift directions${RESET}\n"
+    printf "  ${SUBTEXT}acme-worktree doctor --adopt                      # register worktrees that have no instance${RESET}\n"
+    printf "\n"
+    printf "${BOLD}How it works:${RESET}\n"
+    printf "  ${SUBTEXT}• Creates git worktree at <worktreeRoot>/<worktreePrefix><name>${RESET}\n"
+    printf "  ${SUBTEXT}• Symlinks .claude/ for shared agents, hooks, and skills${RESET}\n"
+    printf "  ${SUBTEXT}• Auto-assigns instance number + cloud alias${RESET}\n"
+    printf "  ${SUBTEXT}• Configures backend .env, frontend .env.local, Docker, and E2E${RESET}\n"
+    printf "  ${SUBTEXT}• Copies secrets from primary instance (no manual secret-manager lookups)${RESET}\n"
+    printf "\n"
+    printf "${BOLD}Config:${RESET}\n"
+    printf "  ${SUBTEXT}$CONFIG_FILE${RESET}\n"
+    printf "  ${SUBTEXT}Override with \$ACME_WORKTREE_CONFIG; start from multi-instance.config.example.json${RESET}\n"
+}
+
+# ── Dispatch ─────────────────────────────────────────────────────────────────
+
+# Every command except help needs paths/apps resolved from the config first.
+case "${1:-help}" in
+    help|--help|-h) ;;
+    *) load_config ;;
+esac
+
+case "${1:-help}" in
+    create) shift; cmd_create "$@" ;;
+    remove|rm) shift; cmd_remove "$@" ;;
+    list|ls) cmd_list ;;
+    open) shift; cmd_open "$@" ;;
+    configure|config) shift; cmd_configure "$@" ;;
+    status) shift; cmd_status "$@" ;;
+    align) shift; cmd_align "$@" ;;
+    doctor) shift; cmd_doctor "$@" ;;
+    help|--help|-h) cmd_help ;;
+    *) error "Unknown command: $1 (try 'acme-worktree help')" ;;
+esac
