@@ -124,7 +124,7 @@ Use the **review-test-architect agent** to verify:
 
 - Small, incremental changes
 - Run tests after each change
-- Commit frequently
+- One commit per completed change
 - Keep behavior identical
 - Follow project patterns
 

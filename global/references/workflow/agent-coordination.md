@@ -188,7 +188,7 @@ git commit -m "Issue #1235: Use new types"
 
 ## Best Practices
 
-1. **Commit early and often** - Smaller commits = fewer conflicts
+1. **Small, focused commits** - One concern per commit = fewer conflicts
 2. **Stay in your lane** - Only modify assigned files
 3. **Communicate changes** - Update progress files
 4. **Pull frequently** - Stay synchronized with other agents

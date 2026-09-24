@@ -136,7 +136,7 @@ Task:
 
     Follow coordination rules in /references/workflow/agent-coordination.md
 
-    Commit frequently with message format:
+    Make one commit per completed change, with message format:
     "Issue #{issue}: {specific change}"
 
     Update progress in:
