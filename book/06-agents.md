@@ -75,6 +75,10 @@ for project files:
 > This is intentional — it forces you to catch issues that context-aware reviewers
 > rationalize away.
 
+`omitClaudeMd: true` closes the gap the tool list leaves open: Claude Code loads every
+`CLAUDE.md` into a subagent's context by default, so without it the reviewer would start
+out knowing the project's conventions after all.
+
 The insight is counterintuitive enough to state plainly: *less* context makes this
 reviewer *better*. A reviewer who knows the project's conventions knows all the reasons
 a missing guard is "fine here" — the same reasons the author believed. A reviewer who
