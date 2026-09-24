@@ -22,6 +22,7 @@ description: |
   </example>
 tools: Read
 model: inherit
+omitClaudeMd: true
 color: red
 ---
 

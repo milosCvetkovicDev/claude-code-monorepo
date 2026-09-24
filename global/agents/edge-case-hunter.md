@@ -21,7 +21,8 @@ description: |
   </commentary>
   </example>
 tools: Glob, Grep, LS, Read, Bash
-model: inherit
+model: sonnet
+effort: high
 color: orange
 ---
 
