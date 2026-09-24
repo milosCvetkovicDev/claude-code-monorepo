@@ -33,7 +33,7 @@ Task:
     Instructions:
     1. Implement ONLY your assigned scope
     2. Work ONLY on your assigned files
-    3. Commit frequently with format: "Issue #{number}: {specific change}"
+    3. Make one commit per completed change, with format: "Issue #{number}: {specific change}"
     4. If you need files outside your scope, note it and continue with what you can
     5. Test your changes if applicable
 

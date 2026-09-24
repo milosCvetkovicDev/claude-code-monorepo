@@ -146,7 +146,7 @@ Task:
     Requirements:
     1. Read full task from: .claude/epics/{epic_name}/{task_file}
     2. Work ONLY in your assigned files
-    3. Commit frequently with format: "Issue #$ARGUMENTS: {specific change}"
+    3. Make one commit per completed change, with format: "Issue #$ARGUMENTS: {specific change}"
     4. Update progress in: .claude/epics/{epic_name}/updates/$ARGUMENTS/stream-{X}.md
     5. Follow coordination rules in /references/workflow/agent-coordination.md
 

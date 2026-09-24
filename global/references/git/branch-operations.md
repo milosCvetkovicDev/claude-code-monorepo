@@ -111,7 +111,7 @@ git log --oneline main..epic/{name}
 
 1. **One branch per epic** - Not per issue
 2. **Clean before create** - Always start from updated main
-3. **Commit frequently** - Small commits are easier to merge
+3. **Small, focused commits** - One concern per commit is easier to merge
 4. **Pull before push** - Get latest changes to avoid conflicts
 5. **Use descriptive branches** - `epic/feature-name` not `feature`
 
