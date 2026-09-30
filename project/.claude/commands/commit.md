@@ -61,7 +61,10 @@ Use conventional commit format: `type(scope): description`
 
 Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`
 
-Always include `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>` in the commit message.
+Always end the commit message with a `Co-Authored-By` trailer naming the model you are running as,
+which your system prompt states. In the template below, replace `MODEL_NAME` with it: an Opus 5.5
+session writes `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`, a Sonnet 5.5 session
+`Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
 
 Use a HEREDOC for the commit message:
 
@@ -71,7 +74,7 @@ type(scope): brief description
 
 Longer explanation if needed.
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude MODEL_NAME <noreply@anthropic.com>
 EOF
 )"
 ```

@@ -5,7 +5,7 @@
     "GIT_EDITOR": "true",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_MERGE_AUTOEDIT": "no",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-sonnet-4-6"
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-sonnet-5-5"
   },
   "includeCoAuthoredBy": false,
   "permissions": {
