@@ -45,14 +45,14 @@ Three design choices worth stealing:
 - **`model: sonnet`** — a mechanical bug-fix workflow doesn't need the most expensive
   model. Cost discipline is set per-procedure, where the procedure's difficulty is
   known, not per-session.
-  *Update, 2026-09-30:* since Opus 5.5 and Sonnet 5.5 the published advice runs the
-  other way for code. [What a task costs on Opus 5.5](https://claude.dev/blog/what-a-task-costs-on-opus-5-5/)
-  moves work down to Sonnet or Haiku "for lookups, not for writing code", and keeps a
-  mechanical edit across many files on Opus 5.5 at low effort;
+  *Update, 2026-09-30:* the two posts on the 5.5 models split on code.
   [Building with Claude Sonnet 5.5](https://claude.dev/blog/building-with-claude-sonnet-5-5/)
-  gives Sonnet the well-specified tasks with a way to check the result, such as review
-  and drafting. Setting cost per procedure still holds; for a mechanical code change the
-  dial is now effort rather than the model.
+  starts "well-scoped everyday coding: fixing bugs" on Sonnet 5.5, which fits this skill,
+  and says Sonnet "fits best when the task has a clear spec and a way to check the result".
+  [What a task costs on Opus 5.5](https://claude.dev/blog/what-a-task-costs-on-opus-5-5/)
+  moves down to Sonnet or Haiku "for lookups, not for writing code", and keeps a
+  mechanical edit across many files on Opus 5.5 at low effort. Either way, cost is still
+  set per procedure, and effort is now a second dial next to the model.
 - Parameterized skills add an `args` line and `disable-model-invocation: true` — they
   are tools to be called deliberately (`/implement-domain-event deal-confirmed`), not
   patterns to be auto-matched.
