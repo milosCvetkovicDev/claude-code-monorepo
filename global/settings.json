@@ -4,8 +4,7 @@
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "GIT_EDITOR": "true",
     "GIT_TERMINAL_PROMPT": "0",
-    "GIT_MERGE_AUTOEDIT": "no",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-sonnet-5-5"
+    "GIT_MERGE_AUTOEDIT": "no"
   },
   "includeCoAuthoredBy": false,
   "permissions": {
